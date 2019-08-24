@@ -1,81 +1,99 @@
 import ctypes
 import io
+import logging
+import os
 import subprocess
 import threading
 import time
 import traceback
 from _tkinter import TclError
+from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
 from tkinter import Tk, Button, Entry, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, StringVar, END
-from urllib.parse import urljoin
-from urllib.request import build_opener
 
+import requests
 from PIL import Image, ImageTk
+from requests import RequestException
+from requests.compat import urljoin
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
 
-opener = build_opener()
-opener.addheaders = [('User-agent', USER_AGENT)]
+# TODO: change referer
+REFERER = 'https://cbjpeg.stream.highwebmedia.com'
 
+PROXIES = None
+
+HEADERS = {
+    'User-agent': USER_AGENT,
+    'Referer': REFERER
+}
+
+DELAY = 2000
 PAD = 5
+MAX_FAILS = 6
+OUTPUT = "C:/tmp/"
+
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
 PLAYLIST_URL = "https://booloo.com/live/"
+
+executor = ThreadPoolExecutor(max_workers=20)
+
+root = Tk()
 
 
 class MainWindow:
 
-    def __init__(self, master):
-        self.master = master
-        menubar = Menu(self.master)
+    def __init__(self):
+        menubar = Menu(root)
         self.history = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="History", menu=self.history)
-        self.master.config(menu=menubar)
+        root.config(menu=menubar)
 
         self.session = None
-        self.started = False
-        self.death_listener = None
 
-        self.model_name = "----------------"
-        self.master.title(self.model_name)
+        self.model_name = None
+        self.update_title()
 
         level = 0
 
-        self.image_label = Label(master)
+        self.image_label = Label(root)
         self.image_label.grid(row=level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
         level += 1
         self.input_text = StringVar()
-        self.entry = Entry(master, textvariable=self.input_text, width=80)
-        self.entry.bind("<FocusIn>", self.entry_callback)
+        self.entry = Entry(root, textvariable=self.input_text, width=80)
+        self.entry.bind("<FocusIn>", self.focus_callback)
+        self.entry.bind('<Return>', self.enter_callback)
         self.entry.focus_set()
         self.entry.grid(row=level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
         level += 1
-        self.btn_resolutions = Button(master, text="Update info", command=self.update_model_info)
+        self.btn_resolutions = Button(root, text="Update info", command=self.update_model_info)
         self.btn_resolutions.grid(row=level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.cb_resolutions = ttk.Combobox(master, state="readonly", values=[])
+        self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
         self.cb_resolutions.grid(row=level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         level += 1
-        self.btn_start = Button(master, text="Start", command=self.on_btn_start)
+        self.btn_start = Button(root, text="Start", command=self.on_btn_start)
         self.btn_start.grid(row=level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.btn_stop = Button(master, text="Stop", command=self.on_btn_stop, state=DISABLED)
+        self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
         self.btn_stop.grid(row=level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.copy_button = Button(master, text="Copy model name", command=self.copy_model_name)
+        self.copy_button = Button(root, text="Copy model name", command=self.copy_model_name)
         self.copy_button.grid(row=level, column=2, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.master.protocol("WM_DELETE_WINDOW", self.on_close)
+        root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.play_list_url = None
         self.base_url = None
         self.model_image = None
         self.img_url = None
 
+        self.load_image()
+
     def on_btn_start(self):
-        self.btn_stop.config(state=NORMAL)
         self.btn_start.config(state=DISABLED)
 
         self.stop()
@@ -97,19 +115,13 @@ class MainWindow:
 
         self.cb_resolutions.current(idx)
 
-        self.master.title(self.model_name)
-        self.session = subprocess.Popen(['python', 'session.py',
-                                         self.base_url, self.model_name, self.cb_resolutions.get(), self.img_url],
-                                        stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.update_title()
 
-        self.master.configure(background='green')
+        self.session = RecordSession(self, self.base_url, self.model_name, self.cb_resolutions.get())
+        self.session.start()
 
-        if self.death_listener is not None:
-            if self.death_listener.is_alive():
-                self.death_listener.raise_exception()
-
-        self.death_listener = SessionDeathListener(self, self.session)
-        self.death_listener.start()
+        self.btn_stop.config(state=NORMAL)
+        root.configure(background='green')
 
     def on_btn_stop(self):
         self.stop()
@@ -119,30 +131,22 @@ class MainWindow:
         if self.session is None:
             return
 
-        if self.death_listener is not None:
-            self.death_listener.stop()
-            self.death_listener = None
-
-        try:
-            self.session.communicate(b'exit', timeout=1)
-        except (subprocess.TimeoutExpired, ValueError) as e:
-            print(e)
-
+        self.session.stop()
         self.session = None
 
     def copy_model_name(self):
-        self.master.clipboard_clear()
-        self.master.clipboard_append(self.master.title())
-        self.master.update()
+        root.clipboard_clear()
+        root.clipboard_append(root.title())
+        root.update()
 
     def update_model_info(self):
+        self.set_undefined_state()
         input_url = self.input_text.get().strip()
 
         if len(input_url) == 0:
-            self.model_image = None
-            self.image_label.config(image=None)
             return False
 
+        self.base_url = None
         if input_url.startswith('https://edge'):
             slash_pos = input_url.rfind('/')
             self.base_url = input_url[: slash_pos + 1]
@@ -155,27 +159,25 @@ class MainWindow:
             self.model_name = self.base_url[colon_pos + 1: sd_pos]
         elif input_url.startswith('http'):
             slash_pos = input_url[: -1].rfind('/')
-            self.model_name = input_url[slash_pos + 1: -1]
+            self.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
         else:
             self.model_name = input_url
 
+        if self.base_url is None:
+            success = self.get_resolutions()
+            if not success:
+                self.set_undefined_state()
+                return False
+
         self.img_url = HTTP_IMG_URL + self.model_name
-
-        self.load_image()
-        success = self.get_resolutions()
-        if not success:
-            self.model_image = None
-            self.image_label.config(image=None)
-            return False
-
-        self.master.title(self.model_name)
         self.add_to_history()
+        self.update_title()
 
         return True
 
     def add_to_history(self):
         try:
-            idx = self.history.index(self.model_name)
+            self.history.index(self.model_name)
         except TclError:
             arg = f'{self.model_name}'
             self.history.insert_command(0,
@@ -186,14 +188,17 @@ class MainWindow:
         self.input_text.set(model)
         self.update_model_info()
 
-    def entry_callback(self, event):
+    def focus_callback(self, event):
         self.entry.selection_range(0, END)
+
+    def enter_callback(self, event):
+        self.update_model_info()
 
     def get_resolutions(self):
         playlist_url = urljoin(PLAYLIST_URL, self.model_name)
-        with opener.open(playlist_url) as f:
-            content = f.read().decode('utf-8')
-            lines = content.splitlines()
+        try:
+            r = requests.get(playlist_url, headers=HEADERS, proxies=PROXIES)
+            lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
             resolutions.reverse()
@@ -204,82 +209,163 @@ class MainWindow:
 
             self.cb_resolutions.current(0)
 
-            actual_url = f.geturl()
+            actual_url = r.url
             slash_pos = actual_url.rfind('/')
             self.base_url = actual_url[: slash_pos + 1]
-
-        return True
+            return True
+        except RequestException as error:
+            print("GetPlayList exception model: " + self.model_name)
+            print(error)
+            traceback.print_exc()
+            return False
 
     def load_image(self):
+        if self.img_url is not None:
+            executor.submit(self.fetch_image)
+
+        root.update_idletasks()
+        root.after(DELAY, self.load_image)
+
+    def fetch_image(self):
         try:
-            with opener.open(self.img_url) as f:
-                raw_data = f.read()
-                content = io.BytesIO(raw_data)
-                img = Image.open(content)
-                self.model_image = ImageTk.PhotoImage(img)
-                self.image_label.config(image=self.model_image)
+            response = requests.get(self.img_url, headers=HEADERS, proxies=PROXIES)
+            img = Image.open(io.BytesIO(response.content))
+            root.after_idle(self.update_image, img)
         except BaseException as error:
-            self.model_image = None
-            self.image_label.config(image=None)
+            root.after_idle(self.set_undefined_state)
+            print("Exception URL: " + self.img_url)
             print(error)
             traceback.print_exc()
 
+    def update_image(self, img):
+        self.model_image = ImageTk.PhotoImage(img)
+        self.image_label.config(image=self.model_image)
+
     def on_close(self):
         self.stop()
-        self.master.destroy()
+        root.update_idletasks()
+        root.destroy()
 
     def set_default_state(self):
         self.session = None
         self.btn_stop.config(state=DISABLED)
         self.btn_start.config(state=NORMAL)
-        self.master.configure(background='SystemButtonFace')
+        root.configure(background='SystemButtonFace')
+
+    def update_title(self):
+        root.title(self.model_name or '<Undefined>')
+
+    def set_undefined_state(self):
+        self.model_image = None
+        self.image_label.config(image=None)
+        self.model_name = None
+        self.img_url = None
+        self.update_title()
 
 
-class SessionDeathListener(Thread):
+class Chunks:
+    IDX_CUR_POS = 3
 
-    def __init__(self, window, session):
-        super(SessionDeathListener, self).__init__()
-        self.daemon = True
-        self.session = session
-        self.window = window
+    def __init__(self, lines):
+        self.ts = [line for line in lines if not line.startswith("#")]
+        self.cur_pos = int(lines[Chunks.IDX_CUR_POS].split(':')[1])
+
+
+class RecordSession(Thread):
+    MIN_CHUNKS = 6
+
+    def __init__(self, main_win, url_base, model, chunk_url):
+        super(RecordSession, self).__init__()
+
+        self.main_win = main_win
+        self.base_url = url_base
+        self.model_name = model
+        self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time())))
+        os.mkdir(self.output_dir)
+
+        self.chunks_url = urljoin(self.base_url, chunk_url)
+        self.name = 'RecordSession'
         self.stopped = False
-        self.name = 'SessionDeathListener'
 
-    def run(self):
-        if self.session is None:
-            self.window.set_default_state()
+        self.logger = logging.getLogger('bonga_application')
+        self.logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('[%(asctime)s] %(threadName)s:%(funcName)s > %(message)s')
+
+        self.fh = logging.FileHandler(os.path.join(self.output_dir, self.model_name + '.log'))
+        self.fh.setLevel(logging.DEBUG)
+        self.fh.setFormatter(formatter)
+        self.logger.addHandler(self.fh)
+
+    def get_chunks(self):
+        self.logger.debug(self.chunks_url)
+        try:
+            r = requests.get(self.chunks_url, headers=HEADERS, proxies=PROXIES)
+            lines = r.text.splitlines()
+
+            if len(lines) < RecordSession.MIN_CHUNKS:
+                return None
+
+            return Chunks(lines)
+        except RequestException as error:
+            self.logger.exception(error)
+            return None
+
+    def save_to_file(self, filename):
+        self.logger.debug(filename)
+        fpath = os.path.join(self.output_dir, filename)
+        if os.path.exists(fpath):
+            self.logger.debug("Skipped: " + filename)
             return
 
-        try:
-            while not self.stopped:
-                self.session.stdin.write(b'ping\n')
-                self.session.stdin.flush()
-                answer = self.session.stdout.readline()
+        ts_url = urljoin(self.base_url, filename)
+        subprocess.run(["c:\\progs\\wget\\wget.exe", "-q", "--no-check-certificate",
+                        "-O", fpath,
+                        ts_url])
 
-                if answer == 'bye':
-                    self.window.set_default_state()
-                    return
+    def run(self):
+        self.logger.info("Started!")
+        fails = 0
+        last_pos = 0
+
+        while not self.stopped:
+            chunks = self.get_chunks()
+            if chunks is None:
+                self.logger.info("Offline : " + self.chunks_url)
+                fails += 1
+
+                if fails > MAX_FAILS:
+                    break
 
                 time.sleep(1)
-        except BaseException as e:
-            print(e)
-            traceback.print_exc()
-            self.window.set_default_state()
+                continue
+            else:
+                fails = 0
 
-    def raise_exception(self):
-        thread_id = threading.get_ident()
-        res = ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id,
-                                                         ctypes.py_object(SystemExit))
-        if res > 1:
-            ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id, 0)
-            print(self.name + '> Exception raise failure')
+            if last_pos >= chunks.cur_pos:
+                time.sleep(0.5)
+                continue
+
+            last_pos = chunks.cur_pos
+            self.logger.debug(last_pos)
+
+            try:
+                for ts in chunks.ts:
+                    executor.submit(self.save_to_file, ts)
+            except BaseException as e:
+                self.logger.exception(e)
+
+            time.sleep(0.5)
+
+        root.after_idle(self.main_win.set_default_state)
+        self.logger.info("Exited!")
+        self.fh.close()
+        self.logger.removeHandler(self.fh)
 
     def stop(self):
         self.stopped = True
 
 
 if __name__ == "__main__":
-    root = Tk()
     root.resizable(False, False)
-    my_gui = MainWindow(root)
+    my_gui = MainWindow()
     root.mainloop()
