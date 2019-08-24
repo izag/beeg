@@ -1,15 +1,13 @@
-import ctypes
 import io
 import logging
 import os
 import subprocess
-import threading
 import time
 import traceback
 from _tkinter import TclError
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
-from tkinter import Tk, Button, Entry, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, StringVar, END
+from tkinter import Tk, Button, Entry, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, StringVar, END, HORIZONTAL
 
 import requests
 from PIL import Image, ImageTk
@@ -54,35 +52,45 @@ class MainWindow:
         self.model_name = None
         self.update_title()
 
-        level = 0
+        self.level = 0
 
         self.image_label = Label(root)
-        self.image_label.grid(row=level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.image_label.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        level += 1
+        self.level += 1
         self.input_text = StringVar()
         self.entry = Entry(root, textvariable=self.input_text, width=80)
         self.entry.bind("<FocusIn>", self.focus_callback)
         self.entry.bind('<Return>', self.enter_callback)
         self.entry.focus_set()
-        self.entry.grid(row=level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.entry.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        level += 1
-        self.btn_resolutions = Button(root, text="Update info", command=self.update_model_info)
-        self.btn_resolutions.grid(row=level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.level += 1
+        self.btn_update = Button(root, text="Update info", command=self.update_model_info)
+        self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
-        self.cb_resolutions.grid(row=level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
-        level += 1
+        self.level += 1
+        self.btn_show_recording = Button(root,
+                                         text="Show recording model",
+                                         command=self.show_recording_model,
+                                         state=DISABLED)
+        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
-        self.btn_start.grid(row=level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
-        self.btn_stop.grid(row=level, column=1, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
         self.copy_button = Button(root, text="Copy model name", command=self.copy_model_name)
-        self.copy_button.grid(row=level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.level += 1
+        self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
 
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -121,6 +129,12 @@ class MainWindow:
         self.session.start()
 
         self.btn_stop.config(state=NORMAL)
+        self.btn_show_recording.config(state=NORMAL)
+        self.progress.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.progress.start()
+
+        self.update_title()
+
         root.configure(background='green')
 
     def on_btn_stop(self):
@@ -186,6 +200,7 @@ class MainWindow:
 
     def load_from_history(self, model):
         self.input_text.set(model)
+        self.entry.selection_range(0, END)
         self.update_model_info()
 
     def focus_callback(self, event):
@@ -250,10 +265,25 @@ class MainWindow:
         self.session = None
         self.btn_stop.config(state=DISABLED)
         self.btn_start.config(state=NORMAL)
+        self.btn_show_recording.config(state=DISABLED)
+        self.progress.stop()
+        self.progress.grid_forget()
+        self.update_title()
         root.configure(background='SystemButtonFace')
 
     def update_title(self):
         root.title(self.model_name or '<Undefined>')
+
+        if self.session is None:
+            return
+
+        if not self.session.is_alive():
+            return
+
+        if self.session.model_name != root.title():
+            return
+
+        root.title(root.title() + " - Recording")
 
     def set_undefined_state(self):
         self.model_image = None
@@ -261,6 +291,14 @@ class MainWindow:
         self.model_name = None
         self.img_url = None
         self.update_title()
+
+    def show_recording_model(self):
+        if self.session is None:
+            return
+
+        self.input_text.set(self.session.model_name)
+        self.entry.selection_range(0, END)
+        self.update_model_info()
 
 
 class Chunks:
@@ -286,6 +324,7 @@ class RecordSession(Thread):
         self.chunks_url = urljoin(self.base_url, chunk_url)
         self.name = 'RecordSession'
         self.stopped = False
+        self.daemon = True
 
         self.logger = logging.getLogger('bonga_application')
         self.logger.setLevel(logging.DEBUG)
@@ -356,7 +395,11 @@ class RecordSession(Thread):
 
             time.sleep(0.5)
 
-        root.after_idle(self.main_win.set_default_state)
+        try:
+            root.after_idle(self.main_win.set_default_state)
+        except RuntimeError as e:
+            self.logger.exception(e)
+
         self.logger.info("Exited!")
         self.fh.close()
         self.logger.removeHandler(self.fh)
