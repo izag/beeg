@@ -7,7 +7,8 @@ import traceback
 from _tkinter import TclError
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
-from tkinter import Tk, Button, Entry, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, StringVar, END, HORIZONTAL
+from tkinter import Tk, Button, Entry, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, StringVar, END, HORIZONTAL, \
+    BooleanVar, Checkbutton
 
 import requests
 from PIL import Image, ImageTk
@@ -16,10 +17,9 @@ from requests.compat import urljoin
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
 
-# TODO: change referer
 REFERER = 'https://cbjpeg.stream.highwebmedia.com'
 
-PROXIES = None
+proxies = None
 
 HEADERS = {
     'User-agent': USER_AGENT,
@@ -79,6 +79,16 @@ class MainWindow:
                                          state=DISABLED)
         self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
+        self.use_proxy = BooleanVar()
+        self.use_proxy.set(False)
+        self.use_proxy.trace('w', self.on_use_proxy_change)
+
+        self.chk_use_proxy = Checkbutton(text='Use proxy', variable=self.use_proxy)
+        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
+
+        self.entry_proxy = Entry(root, width=40, state=DISABLED)
+        self.entry_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
         self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
         self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
@@ -134,7 +144,6 @@ class MainWindow:
         self.progress.start()
 
         self.update_title()
-
         root.configure(background='green')
 
     def on_btn_stop(self):
@@ -154,11 +163,22 @@ class MainWindow:
         root.update()
 
     def update_model_info(self):
+        global proxies
+
         self.set_undefined_state()
         input_url = self.input_text.get().strip()
 
         if len(input_url) == 0:
             return False
+
+        if self.use_proxy.get():
+            proxy = self.entry_proxy.get()
+            proxies = {
+                "http": "http://" + proxy,
+                "https": "https://" + proxy
+            }
+        else:
+            proxies = None
 
         self.base_url = None
         if input_url.startswith('https://edge'):
@@ -212,7 +232,7 @@ class MainWindow:
     def get_resolutions(self):
         playlist_url = urljoin(PLAYLIST_URL, self.model_name)
         try:
-            r = requests.get(playlist_url, headers=HEADERS, proxies=PROXIES)
+            r = requests.get(playlist_url, headers=HEADERS, proxies=proxies)
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -243,7 +263,7 @@ class MainWindow:
 
     def fetch_image(self):
         try:
-            response = requests.get(self.img_url, headers=HEADERS, proxies=PROXIES)
+            response = requests.get(self.img_url, headers=HEADERS, proxies=proxies)
             img = Image.open(io.BytesIO(response.content))
             root.after_idle(self.update_image, img)
         except BaseException as error:
@@ -300,6 +320,15 @@ class MainWindow:
         self.entry.selection_range(0, END)
         self.update_model_info()
 
+    def on_use_proxy_change(self, *args):
+        if self.use_proxy.get():
+            self.entry_proxy.config(state=NORMAL)
+            self.entry_proxy.focus_set()
+            self.entry_proxy.selection_range(0, END)
+            self.entry_proxy.selection_range(0, END)
+        else:
+            self.entry_proxy.config(state=DISABLED)
+
 
 class Chunks:
     IDX_CUR_POS = 3
@@ -338,7 +367,7 @@ class RecordSession(Thread):
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
-            r = requests.get(self.chunks_url, headers=HEADERS, proxies=PROXIES)
+            r = requests.get(self.chunks_url, headers=HEADERS, proxies=proxies)
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
