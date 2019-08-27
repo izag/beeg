@@ -45,9 +45,11 @@ class MainWindow:
         menubar = Menu(root)
         self.history = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="History", menu=self.history)
+        menubar.add_command(label="Toggle image", command=self.toggle_image)
         root.config(menu=menubar)
 
         self.session = None
+        self.show_image = True
 
         self.model_name = None
         self.update_title()
@@ -171,8 +173,8 @@ class MainWindow:
         if len(input_url) == 0:
             return False
 
-        if self.use_proxy.get():
-            proxy = self.entry_proxy.get()
+        proxy = self.entry_proxy.get()
+        if self.use_proxy.get() and len(proxy.strip()) != 0:
             proxies = {
                 "http": "http://" + proxy,
                 "https": "https://" + proxy
@@ -255,7 +257,7 @@ class MainWindow:
             return False
 
     def load_image(self):
-        if self.img_url is not None:
+        if (self.img_url is not None) or self.show_image:
             executor.submit(self.fetch_image)
 
         root.update_idletasks()
@@ -329,6 +331,18 @@ class MainWindow:
         else:
             self.entry_proxy.config(state=DISABLED)
 
+    def toggle_image(self):
+        if self.show_image:
+            self.model_image = None
+            self.image_label.config(image=None)
+            self.img_url = None
+            self.image_label.grid_forget()
+            self.show_image = False
+        else:
+            self.show_image = True
+            self.image_label.grid(row=0, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+            self.update_model_info()
+
 
 class Chunks:
     IDX_CUR_POS = 3
@@ -355,7 +369,7 @@ class RecordSession(Thread):
         self.stopped = False
         self.daemon = True
 
-        self.logger = logging.getLogger('bonga_application')
+        self.logger = logging.getLogger('beeg_application')
         self.logger.setLevel(logging.DEBUG)
         formatter = logging.Formatter('[%(asctime)s] %(threadName)s:%(funcName)s > %(message)s')
 
