@@ -42,11 +42,11 @@ root = Tk()
 class MainWindow:
 
     def __init__(self):
-        menubar = Menu(root)
-        self.history = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="History", menu=self.history)
-        menubar.add_command(label="Toggle image", command=self.toggle_image)
-        root.config(menu=menubar)
+        self.menu_bar = Menu(root)
+        self.history = Menu(self.menu_bar, tearoff=0)
+        self.menu_bar.add_cascade(label="History", menu=self.history)
+        self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
+        root.config(menu=self.menu_bar)
 
         self.session = None
         self.show_image = True
@@ -61,7 +61,7 @@ class MainWindow:
 
         self.level += 1
         self.input_text = StringVar()
-        self.entry = Entry(root, textvariable=self.input_text, width=80)
+        self.entry = Entry(root, textvariable=self.input_text, width=60)
         self.entry.bind("<FocusIn>", self.focus_callback)
         self.entry.bind('<Return>', self.enter_callback)
         self.entry.focus_set()
@@ -88,7 +88,7 @@ class MainWindow:
         self.chk_use_proxy = Checkbutton(text='Use proxy', variable=self.use_proxy)
         self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
 
-        self.entry_proxy = Entry(root, width=40, state=DISABLED)
+        self.entry_proxy = Entry(root, width=30, state=DISABLED)
         self.entry_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
@@ -167,6 +167,7 @@ class MainWindow:
     def update_model_info(self):
         global proxies
 
+        self.menu_bar.entryconfig("History", state=DISABLED)
         self.set_undefined_state()
         input_url = self.input_text.get().strip()
 
@@ -209,6 +210,8 @@ class MainWindow:
         self.add_to_history()
         self.update_title()
 
+        self.menu_bar.entryconfig("History", state=NORMAL)
+
         return True
 
     def add_to_history(self):
@@ -234,7 +237,7 @@ class MainWindow:
     def get_resolutions(self):
         playlist_url = urljoin(PLAYLIST_URL, self.model_name)
         try:
-            r = requests.get(playlist_url, headers=HEADERS, proxies=proxies)
+            r = requests.get(playlist_url, headers=HEADERS, timeout=5)
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -265,9 +268,12 @@ class MainWindow:
 
     def fetch_image(self):
         try:
-            response = requests.get(self.img_url, headers=HEADERS, proxies=proxies)
+            response = requests.get(self.img_url, headers=HEADERS, timeout=5)
             img = Image.open(io.BytesIO(response.content))
-            root.after_idle(self.update_image, img)
+            w, h = img.size
+            k = 450 / w
+            img_resized = img.resize((450, int(h * k)))
+            root.after_idle(self.update_image, img_resized)
         except BaseException as error:
             root.after_idle(self.set_undefined_state)
             print("Exception URL: " + self.img_url)
@@ -308,6 +314,7 @@ class MainWindow:
         root.title(root.title() + " - Recording")
 
     def set_undefined_state(self):
+        self.menu_bar.entryconfig("History", state=NORMAL)
         self.model_image = None
         self.image_label.config(image=None)
         self.model_name = None
@@ -381,7 +388,7 @@ class RecordSession(Thread):
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
-            r = requests.get(self.chunks_url, headers=HEADERS, proxies=proxies)
+            r = requests.get(self.chunks_url, headers=HEADERS, timeout=5)
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
@@ -394,15 +401,21 @@ class RecordSession(Thread):
 
     def save_to_file(self, filename):
         self.logger.debug(filename)
-        fpath = os.path.join(self.output_dir, filename)
-        if os.path.exists(fpath):
+        file_path = os.path.join(self.output_dir, filename)
+        if os.path.exists(file_path):
             self.logger.debug("Skipped: " + filename)
             return
 
         ts_url = urljoin(self.base_url, filename)
-        subprocess.run(["c:\\progs\\wget\\wget.exe", "-q", "--no-check-certificate",
-                        "-O", fpath,
-                        ts_url])
+        # subprocess.run(["c:\\progs\\wget\\wget.exe", "-q", "--no-check-certificate",
+        #                 "-O", fpath,
+        #                 ts_url])
+        try:
+            with requests.get(ts_url, stream=True, timeout=5) as r, open(file_path, 'wb') as fd:
+                for chunk in r.iter_content(chunk_size=65536):
+                    fd.write(chunk)
+        except BaseException as error:
+            self.logger.exception(error)
 
     def run(self):
         self.logger.info("Started!")
