@@ -30,6 +30,7 @@ DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
 OUTPUT = "C:/tmp/"
+LOGS = "./logs/"
 
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
 PLAYLIST_URL = "https://booloo.com/live/"
@@ -42,14 +43,18 @@ root = Tk()
 class MainWindow:
 
     def __init__(self):
+        global root
+
         self.menu_bar = Menu(root)
         self.history = Menu(self.menu_bar, tearoff=0)
         self.menu_bar.add_cascade(label="History", menu=self.history)
         self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
+        self.hist_dict = {}
+        self.load_hist_dict()
         root.config(menu=self.menu_bar)
 
         self.session = None
-        self.show_image = True
+        self.show_image = False
 
         self.model_name = None
         self.update_title()
@@ -57,61 +62,70 @@ class MainWindow:
         self.level = 0
 
         self.image_label = Label(root)
-        self.image_label.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.level += 1
         self.input_text = StringVar()
         self.entry = Entry(root, textvariable=self.input_text, width=60)
         self.entry.bind("<FocusIn>", self.focus_callback)
         self.entry.bind('<Return>', self.enter_callback)
         self.entry.focus_set()
-        self.entry.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.level += 1
         self.btn_update = Button(root, text="Update info", command=self.update_model_info)
-        self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-
         self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
-        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.level += 1
         self.btn_show_recording = Button(root,
                                          text="Show recording model",
                                          command=self.show_recording_model,
                                          state=DISABLED)
-        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.use_proxy = BooleanVar()
         self.use_proxy.set(False)
         self.use_proxy.trace('w', self.on_use_proxy_change)
 
         self.chk_use_proxy = Checkbutton(text='Use proxy', variable=self.use_proxy)
-        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
-
         self.entry_proxy = Entry(root, width=30, state=DISABLED)
-        self.entry_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
-        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-
         self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
-        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
-
         self.copy_button = Button(root, text="Copy model name", command=self.copy_model_name)
-        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
 
+        root.bind("<FocusIn>", self.focus_callback)
+        # root.bind("<Configure>", self.configure)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.place_widgets()
 
         self.play_list_url = None
         self.base_url = None
         self.model_image = None
         self.img_url = None
+        self.drag_id = ''
+
+        self.logger = logging.getLogger('history')
+        self.logger.setLevel(logging.INFO)
+
+        self.fh = logging.FileHandler(os.path.join(LOGS, f'hist_{int(time.time())}.log'))
+        self.fh.setLevel(logging.INFO)
+        self.logger.addHandler(self.fh)
 
         self.load_image()
+
+    def place_widgets(self):
+        self.level = 0
+        # self.image_label.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.level += 1
+        self.entry.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.level += 1
+        self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.level += 1
+        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
+        self.entry_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.level += 1
+        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
+        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        # for progress bar
+        self.level += 1
 
     def on_btn_start(self):
         self.btn_start.config(state=DISABLED)
@@ -160,6 +174,8 @@ class MainWindow:
         self.session = None
 
     def copy_model_name(self):
+        global root
+
         root.clipboard_clear()
         root.clipboard_append(root.title())
         root.update()
@@ -167,11 +183,13 @@ class MainWindow:
     def update_model_info(self):
         global proxies
 
-        self.menu_bar.entryconfig("History", state=DISABLED)
         self.set_undefined_state()
+        self.menu_state(DISABLED)
+
         input_url = self.input_text.get().strip()
 
         if len(input_url) == 0:
+            self.set_undefined_state()
             return False
 
         proxy = self.entry_proxy.get()
@@ -207,20 +225,21 @@ class MainWindow:
                 return False
 
         self.img_url = HTTP_IMG_URL + self.model_name
-        self.add_to_history()
+        self.add_to_history(self.model_name)
         self.update_title()
+        self.logger.info(self.model_name)
 
-        self.menu_bar.entryconfig("History", state=NORMAL)
+        self.menu_state(NORMAL)
 
         return True
 
-    def add_to_history(self):
+    def add_to_history(self, name):
         try:
-            self.history.index(self.model_name)
+            self.history.index(name)
         except TclError:
-            arg = f'{self.model_name}'
+            arg = f'{name}'
             self.history.insert_command(0,
-                                        label=self.model_name,
+                                        label=name,
                                         command=lambda: self.load_from_history(arg))
 
     def load_from_history(self, model):
@@ -260,6 +279,9 @@ class MainWindow:
             return False
 
     def load_image(self):
+        global executor
+        global root
+
         if (self.img_url is not None) or self.show_image:
             executor.submit(self.fetch_image)
 
@@ -267,8 +289,10 @@ class MainWindow:
         root.after(DELAY, self.load_image)
 
     def fetch_image(self):
+        global root
+
         try:
-            response = requests.get(self.img_url, headers=HEADERS, timeout=5)
+            response = requests.get(self.img_url, headers=HEADERS, timeout=2)
             img = Image.open(io.BytesIO(response.content))
             w, h = img.size
             k = 450 / w
@@ -285,11 +309,17 @@ class MainWindow:
         self.image_label.config(image=self.model_image)
 
     def on_close(self):
+        global root
+
         self.stop()
         root.update_idletasks()
         root.destroy()
+        self.fh.close()
+        self.logger.removeHandler(self.fh)
 
     def set_default_state(self):
+        global root
+
         self.session = None
         self.btn_stop.config(state=DISABLED)
         self.btn_start.config(state=NORMAL)
@@ -300,6 +330,8 @@ class MainWindow:
         root.configure(background='SystemButtonFace')
 
     def update_title(self):
+        global root
+
         root.title(self.model_name or '<Undefined>')
 
         if self.session is None:
@@ -314,7 +346,7 @@ class MainWindow:
         root.title(root.title() + " - Recording")
 
     def set_undefined_state(self):
-        self.menu_bar.entryconfig("History", state=NORMAL)
+        self.menu_state(NORMAL)
         self.model_image = None
         self.image_label.config(image=None)
         self.model_name = None
@@ -349,6 +381,44 @@ class MainWindow:
             self.show_image = True
             self.image_label.grid(row=0, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
             self.update_model_info()
+
+    def load_hist_dict(self):
+        for file in os.listdir(LOGS):
+            with open(os.path.join(LOGS, file)) as f:
+                for line in f.readlines():
+                    name = line.strip()
+                    count = self.hist_dict.get(name, 0)
+                    self.hist_dict[name] = count + 1
+
+        hist = sorted(self.hist_dict.items(), key=lambda x: x[1], reverse=True)
+        for item in reversed(hist[:10]):
+            self.add_to_history(item[0])
+
+    def menu_state(self, state):
+        self.menu_bar.entryconfig("History", state=state)
+        self.menu_bar.entryconfig("Toggle image", state=state)
+
+    # def configure(self, event):
+    #     # do nothing if the event is triggered by one of root's children
+    #     if event.widget is not root:
+    #         return
+    #
+    #     if self.drag_id != '':
+    #         root.after_cancel(self.drag_id)
+    #
+    #     self.drag_id = root.after(100, self.stop_configure)
+    #
+    # def stop_configure(self):
+    #     self.drag_id = ''
+    #     self.clear_grid()
+    #     self.place_widgets()
+    #
+    # def clear_grid(self):
+    #     global root
+    #
+    #     slaves = root.grid_slaves()
+    #     for widget in slaves:
+    #         widget.grid_forget()
 
 
 class Chunks:
@@ -388,7 +458,7 @@ class RecordSession(Thread):
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
-            r = requests.get(self.chunks_url, headers=HEADERS, timeout=5)
+            r = requests.get(self.chunks_url, headers=HEADERS, timeout=2)
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
@@ -411,13 +481,16 @@ class RecordSession(Thread):
         #                 "-O", fpath,
         #                 ts_url])
         try:
-            with requests.get(ts_url, stream=True, timeout=5) as r, open(file_path, 'wb') as fd:
+            with requests.get(ts_url, stream=True, timeout=10) as r, open(file_path, 'wb') as fd:
                 for chunk in r.iter_content(chunk_size=65536):
                     fd.write(chunk)
         except BaseException as error:
             self.logger.exception(error)
 
     def run(self):
+        global executor
+        global root
+
         self.logger.info("Started!")
         fails = 0
         last_pos = 0
@@ -465,6 +538,9 @@ class RecordSession(Thread):
 
 
 if __name__ == "__main__":
+    if not os.path.exists(LOGS):
+        os.mkdir(LOGS)
+
     root.resizable(False, False)
     my_gui = MainWindow()
     root.mainloop()
