@@ -6,7 +6,8 @@ import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
-    BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, BOTTOM, Frame
+    BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
+    StringVar, TOP
 
 import requests
 from PIL import Image, ImageTk
@@ -59,40 +60,58 @@ class MainWindow:
 
         self.image_label = Label(root)
 
+        self.level += 1
         self.cb_model = ttk.Combobox(root, width=60)
         self.cb_model.bind("<FocusIn>", self.focus_callback)
         self.cb_model.bind("<Button-1>", self.drop_down_callback)
         self.cb_model.bind('<Return>', self.enter_callback)
         self.cb_model.focus_set()
+        self.cb_model.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
+        self.level += 1
         self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
+        self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+
         self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
+        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.level += 1
         self.btn_show_recording = Button(root,
                                          text="Show recording model",
                                          command=self.show_recording_model,
                                          state=DISABLED)
+        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.use_proxy = BooleanVar()
         self.use_proxy.set(False)
         self.use_proxy.trace('w', self.on_use_proxy_change)
 
         self.chk_use_proxy = Checkbutton(text='Use proxy', variable=self.use_proxy)
+        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
+
         self.cb_proxy = ttk.Combobox(root, width=30, state=DISABLED)
+        self.cb_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
+        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+
         self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
+        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
+
         self.copy_button = Button(root, text="Copy model name", command=self.copy_model_name)
+        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
 
         root.bind("<FocusIn>", self.focus_callback)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
-        self.place_widgets()
-
         self.play_list_url = None
         self.base_url = None
         self.model_image = None
         self.img_url = None
-        self.drag_id = ''
 
         self.hist_logger = logging.getLogger('history')
         self.hist_logger.setLevel(logging.INFO)
@@ -118,24 +137,6 @@ class MainWindow:
 
         self.load_image()
 
-    def place_widgets(self):
-        self.level = 0
-        self.level += 1
-        self.cb_model.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
-        self.level += 1
-        self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
-        self.level += 1
-        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
-        self.cb_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
-        self.level += 1
-        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
-        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
-        # for progress bar
-        self.level += 1
-
     def on_btn_start(self):
         self.btn_start.config(state=DISABLED)
 
@@ -158,8 +159,6 @@ class MainWindow:
 
         self.cb_resolutions.current(idx)
 
-        self.update_title()
-
         self.session = RecordSession(self, self.base_url, self.model_name, self.cb_resolutions.get())
         self.session.start()
 
@@ -169,6 +168,7 @@ class MainWindow:
         self.progress.start()
 
         self.update_title()
+
         root.configure(background='green')
 
     def on_btn_stop(self):
@@ -406,24 +406,97 @@ class MainWindow:
             self.update_model_info(True)
 
     def show_full_history(self):
-        hist_window = Toplevel(root)
-        frm_top = Frame(hist_window)
-        frm_bottom = Frame(hist_window)
-        lbox = Listbox(frm_top, width=60, height=40, selectmode=SINGLE)
-        lbox.pack(side=LEFT, fill=BOTH, expand=1)
-        scroll = Scrollbar(frm_top, command=lbox.yview, orient=VERTICAL)
-        scroll.pack(side=RIGHT, fill=Y)
-        lbox.config(yscrollcommand=scroll.set)
-        lbox.bind('<<ListboxSelect>>', self.on_listbox_select)
+        HistoryWindow(self, Toplevel(root))
 
-        button = Button(frm_bottom, text="Select")
-        button.pack(side=BOTTOM)
+    def back_in_history(self):
+        if len(self.hist_stack) == 0:
+            return
+
+        self.cb_model.set(self.hist_stack.pop())
+        self.update_model_info(False)
+
+    def load_hist_dict(self):
+        for file in os.listdir(LOGS):
+            if not file.startswith('hist_'):
+                continue
+
+            full_path = os.path.join(LOGS, file)
+            if os.path.getsize(full_path) == 0:
+                continue
+
+            with open(full_path) as f:
+                for line in f.readlines():
+                    name = line.strip()
+                    count = self.hist_dict.get(name, 0)
+                    self.hist_dict[name] = count + 1
+
+    def load_proxy_dict(self):
+        for file in os.listdir(LOGS):
+            if not file.startswith('proxy_'):
+                continue
+
+            full_path = os.path.join(LOGS, file)
+            if os.path.getsize(full_path) == 0:
+                continue
+
+            with open(full_path) as f:
+                for line in f.readlines():
+                    name = line.strip()
+                    count = self.proxy_dict.get(name, 0)
+                    self.proxy_dict[name] = count + 1
+
+        hist = sorted(self.proxy_dict.items(), key=lambda x: x[1], reverse=True)
+        self.cb_proxy.configure(values=[x[0] for x in hist[:10]])
+
+
+class HistoryWindow:
+
+    def __init__(self, parent, win):
+        self.window = win
+        self.parent_window = parent
+
+        frm_top = Frame(win)
+        frm_bottom = Frame(win)
+
+        self.search = StringVar()
+        self.search.trace("w", lambda name, index, mode, sv=self.search: self.on_search(sv))
+        entry_search = Entry(frm_top, textvariable=self.search, width=62)
+        entry_search.pack(side=TOP, fill=BOTH, expand=1)
+
+        self.list_box = Listbox(frm_bottom, width=60, height=40, selectmode=SINGLE)
+        self.list_box.pack(side=LEFT, fill=BOTH, expand=1)
+        scroll = Scrollbar(frm_bottom, command=self.list_box.yview, orient=VERTICAL)
+        scroll.pack(side=RIGHT, fill=Y)
+        self.list_box.config(yscrollcommand=scroll.set)
+        self.list_box.bind('<<ListboxSelect>>', self.on_listbox_select)
 
         frm_top.pack()
         frm_bottom.pack()
 
-        hist = sorted(self.hist_dict.items(), key=lambda x: x[1], reverse=True)
-        lbox.insert(END, *[x[0] for x in hist])
+        self.fill_list_box()
+
+    def on_search(self, search):
+        query = search.get().strip().lower()
+        if len(query) < 2:
+            self.fill_list_box()
+            return
+
+        self.list_box.delete(0, END)
+        search_results = []
+        for key in self.parent_window.hist_dict:
+            pos = key.lower().find(query)
+            if pos == -1:
+                continue
+
+            search_results.append((key, pos))
+
+        search_results.sort(key=lambda x: x[1])
+        self.list_box.insert(END, *[x[0] for x in search_results])
+
+    def fill_list_box(self):
+        self.list_box.delete(0, END)
+        hist = sorted(self.parent_window.hist_dict.items(), key=lambda x: x[1], reverse=True)
+        self.list_box.insert(END, *[x[0] for x in hist])
 
     def on_listbox_select(self, event):
         w = event.widget
@@ -433,44 +506,7 @@ class MainWindow:
 
         index = selected[0]
         value = w.get(index)
-        self.cb_model.set(value)
-
-    def back_in_history(self):
-        if len(self.hist_stack) == 0:
-            return
-
-        self.cb_model.set(self.hist_stack.pop())
-        self.update_model_info(False)
-
-    # def set_model_name
-
-    def load_hist_dict(self):
-        for file in os.listdir(LOGS):
-            if not file.startswith('hist_'):
-                continue
-
-            with open(os.path.join(LOGS, file)) as f:
-                for line in f.readlines():
-                    name = line.strip()
-                    count = self.hist_dict.get(name, 0)
-                    self.hist_dict[name] = count + 1
-
-        hist = sorted(self.hist_dict.items(), key=lambda x: x[1], reverse=True)
-        self.cb_model.configure(values=[x[0] for x in hist[:10]])
-
-    def load_proxy_dict(self):
-        for file in os.listdir(LOGS):
-            if not file.startswith('proxy_'):
-                continue
-
-            with open(os.path.join(LOGS, file)) as f:
-                for line in f.readlines():
-                    name = line.strip()
-                    count = self.proxy_dict.get(name, 0)
-                    self.proxy_dict[name] = count + 1
-
-        hist = sorted(self.proxy_dict.items(), key=lambda x: x[1], reverse=True)
-        self.cb_proxy.configure(values=[x[0] for x in hist[:10]])
+        self.parent_window.cb_model.set(value)
 
 
 class Chunks:
@@ -529,9 +565,6 @@ class RecordSession(Thread):
             return
 
         ts_url = urljoin(self.base_url, filename)
-        # subprocess.run(["c:\\progs\\wget\\wget.exe", "-q", "--no-check-certificate",
-        #                 "-O", fpath,
-        #                 ts_url])
         try:
             with requests.get(ts_url, stream=True, timeout=10) as r, open(file_path, 'wb') as fd:
                 for chunk in r.iter_content(chunk_size=65536):
