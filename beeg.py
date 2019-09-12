@@ -9,6 +9,7 @@ from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu,
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
     StringVar, TOP
 
+import clipboard
 import requests
 from PIL import Image, ImageTk
 from requests import RequestException
@@ -66,14 +67,14 @@ class MainWindow:
         self.cb_model.bind("<Button-1>", self.drop_down_callback)
         self.cb_model.bind('<Return>', self.enter_callback)
         self.cb_model.focus_set()
-        self.cb_model.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_model.grid(row=self.level, column=0, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
         self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
-        self.cb_resolutions.grid(row=self.level, column=1, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_resolutions.grid(row=self.level, column=1, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_show_recording = Button(root,
@@ -90,7 +91,7 @@ class MainWindow:
         self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
 
         self.cb_proxy = ttk.Combobox(root, width=30, state=DISABLED)
-        self.cb_proxy.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_proxy.grid(row=self.level, column=2, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
@@ -99,8 +100,11 @@ class MainWindow:
         self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
         self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.copy_button = Button(root, text="Copy model name", command=self.copy_model_name)
+        self.copy_button = Button(root, text="Copy", command=self.copy_model_name)
         self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.paste_button = Button(root, text="Paste", command=self.paste_model_name)
+        self.paste_button.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
@@ -164,7 +168,7 @@ class MainWindow:
 
         self.btn_stop.config(state=NORMAL)
         self.btn_show_recording.config(state=NORMAL)
-        self.progress.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.progress.grid(row=self.level, column=0, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
         self.progress.start()
 
         self.update_title()
@@ -183,11 +187,11 @@ class MainWindow:
         self.session = None
 
     def copy_model_name(self):
-        global root
+        clipboard.copy(self.cb_model.get())
 
-        root.clipboard_clear()
-        root.clipboard_append(root.title())
-        root.update()
+    def paste_model_name(self):
+        self.cb_model.set(clipboard.paste())
+        self.cb_model.selection_range(0, END)
 
     def update_model_info(self, remember):
         global proxies
@@ -270,6 +274,7 @@ class MainWindow:
         self.cb_model.selection_range(0, END)
 
     def drop_down_callback(self, event):
+        self.cb_model.focus_set()
         self.cb_model.selection_range(0, END)
         self.cb_model.event_generate('<Down>')
 
@@ -402,7 +407,7 @@ class MainWindow:
             self.show_image = False
         else:
             self.show_image = True
-            self.image_label.grid(row=0, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+            self.image_label.grid(row=0, column=0, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
             self.update_model_info(True)
 
     def show_full_history(self):
@@ -454,6 +459,7 @@ class HistoryWindow:
     def __init__(self, parent, win):
         self.window = win
         self.parent_window = parent
+        self.window.title("Full history")
 
         frm_top = Frame(win)
         frm_bottom = Frame(win)
