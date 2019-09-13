@@ -53,6 +53,7 @@ class MainWindow:
 
         self.session = None
         self.show_image = False
+        self.hist_window = None
 
         self.model_name = None
         self.update_title()
@@ -272,6 +273,8 @@ class MainWindow:
 
     def focus_callback(self, event):
         self.cb_model.selection_range(0, END)
+        if self.hist_window is not None:
+            self.hist_window.lift()
 
     def drop_down_callback(self, event):
         self.cb_model.focus_set()
@@ -284,7 +287,7 @@ class MainWindow:
     def get_resolutions(self):
         playlist_url = urljoin(PLAYLIST_URL, self.model_name)
         try:
-            r = requests.get(playlist_url, headers=HEADERS, timeout=5)
+            r = requests.get(playlist_url, headers=HEADERS, timeout=10)
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -320,7 +323,7 @@ class MainWindow:
         global root
 
         try:
-            response = requests.get(self.img_url, headers=HEADERS, timeout=2)
+            response = requests.get(self.img_url, headers=HEADERS, timeout=10)
             img = Image.open(io.BytesIO(response.content))
             w, h = img.size
             k = 450 / w
@@ -411,7 +414,10 @@ class MainWindow:
             self.update_model_info(True)
 
     def show_full_history(self):
-        HistoryWindow(self, Toplevel(root))
+        if self.hist_window is not None:
+            self.hist_window.on_close()
+
+        self.hist_window = HistoryWindow(self, Toplevel(root))
 
     def back_in_history(self):
         if len(self.hist_stack) == 0:
@@ -460,14 +466,18 @@ class HistoryWindow:
         self.window = win
         self.parent_window = parent
         self.window.title("Full history")
+        self.window.resizable(False, False)
 
         frm_top = Frame(win)
         frm_bottom = Frame(win)
 
         self.search = StringVar()
         self.search.trace("w", lambda name, index, mode, sv=self.search: self.on_search(sv))
-        entry_search = Entry(frm_top, textvariable=self.search, width=62)
-        entry_search.pack(side=TOP, fill=BOTH, expand=1)
+        self.entry_search = Entry(frm_top, textvariable=self.search, width=57)
+        self.entry_search.pack(side=LEFT, fill=BOTH, expand=1)
+
+        self.btn_clear = Button(frm_top, text="Clear", command=self.on_clear)
+        self.btn_clear.pack(side=RIGHT, fill=BOTH, expand=1)
 
         self.list_box = Listbox(frm_bottom, width=60, height=40, selectmode=SINGLE)
         self.list_box.pack(side=LEFT, fill=BOTH, expand=1)
@@ -479,7 +489,14 @@ class HistoryWindow:
         frm_top.pack()
         frm_bottom.pack()
 
+        self.window.bind("<FocusIn>", self.focus_callback)
+        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
+
         self.fill_list_box()
+
+    def on_clear(self):
+        self.search.set("")
+        self.on_search(self.search)
 
     def on_search(self, search):
         query = search.get().strip().lower()
@@ -513,6 +530,19 @@ class HistoryWindow:
         index = selected[0]
         value = w.get(index)
         self.parent_window.cb_model.set(value)
+
+    def lift(self):
+        self.window.lift()
+
+    def on_close(self):
+        self.parent_window.hist_window = None
+        self.window.update_idletasks()
+        self.window.destroy()
+
+    def focus_callback(self, event):
+        self.entry_search.focus_set()
+        self.entry_search.selection_range(0, END)
+        root.lift()
 
 
 class Chunks:
@@ -552,7 +582,7 @@ class RecordSession(Thread):
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
-            r = requests.get(self.chunks_url, headers=HEADERS, timeout=2)
+            r = requests.get(self.chunks_url, headers=HEADERS, timeout=5)
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
