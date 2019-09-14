@@ -7,7 +7,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
-    StringVar, TOP
+    StringVar
 
 import clipboard
 import requests
@@ -26,6 +26,7 @@ HEADERS = {
     'Referer': REFERER
 }
 
+TIMEOUT = (3.05, 9.05)
 DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
@@ -44,6 +45,9 @@ class MainWindow:
 
     def __init__(self):
         global root
+
+        self.http_session = requests.Session()
+        self.http_session.headers.update(HEADERS)
 
         self.menu_bar = Menu(root)
         self.menu_bar.add_command(label="Back", command=self.back_in_history)
@@ -287,7 +291,7 @@ class MainWindow:
     def get_resolutions(self):
         playlist_url = urljoin(PLAYLIST_URL, self.model_name)
         try:
-            r = requests.get(playlist_url, headers=HEADERS, timeout=10)
+            r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -323,7 +327,7 @@ class MainWindow:
         global root
 
         try:
-            response = requests.get(self.img_url, headers=HEADERS, timeout=10)
+            response = self.http_session.get(self.img_url, timeout=TIMEOUT)
             img = Image.open(io.BytesIO(response.content))
             w, h = img.size
             k = 450 / w
@@ -349,6 +353,7 @@ class MainWindow:
         self.hist_logger.removeHandler(self.fh_hist)
         self.fh_proxy.close()
         self.proxy_logger.removeHandler(self.fh_proxy)
+        self.http_session.close()
 
     def set_default_state(self):
         global root
@@ -540,7 +545,6 @@ class HistoryWindow:
         self.window.destroy()
 
     def focus_callback(self, event):
-        self.entry_search.focus_set()
         self.entry_search.selection_range(0, END)
         root.lift()
 
@@ -553,11 +557,35 @@ class Chunks:
         self.cur_pos = int(lines[Chunks.IDX_CUR_POS].split(':')[1])
 
 
+class SessionPool:
+
+    def __init__(self, count):
+        self.size = count
+        self.data = []
+        self.current = 0
+        for i in range(self.size):
+            s = requests.Session()
+            s.headers.update(HEADERS)
+            self.data.append(s)
+
+    def get(self):
+        s = self.data[self.current]
+        self.current += 1
+        self.current %= self.size
+        return s
+
+
+POOL = SessionPool(5)
+
+
 class RecordSession(Thread):
     MIN_CHUNKS = 6
 
     def __init__(self, main_win, url_base, model, chunk_url):
         super(RecordSession, self).__init__()
+
+        self.http_session = requests.Session()
+        self.http_session.headers.update(HEADERS)
 
         self.main_win = main_win
         self.base_url = url_base
@@ -582,7 +610,7 @@ class RecordSession(Thread):
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
-            r = requests.get(self.chunks_url, headers=HEADERS, timeout=5)
+            r = self.http_session.get(self.chunks_url, timeout=TIMEOUT)
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
@@ -602,7 +630,8 @@ class RecordSession(Thread):
 
         ts_url = urljoin(self.base_url, filename)
         try:
-            with requests.get(ts_url, stream=True, timeout=10) as r, open(file_path, 'wb') as fd:
+            session = POOL.get()
+            with session.get(ts_url, stream=True, timeout=TIMEOUT) as r, open(file_path, 'wb') as fd:
                 for chunk in r.iter_content(chunk_size=65536):
                     fd.write(chunk)
         except BaseException as error:
@@ -653,6 +682,7 @@ class RecordSession(Thread):
         self.logger.info("Exited!")
         self.fh.close()
         self.logger.removeHandler(self.fh)
+        self.http_session.close()
 
     def stop(self):
         self.stopped = True
