@@ -314,7 +314,8 @@ class MainWindow:
         self.update_model_info(True)
 
     def get_resolutions(self):
-        playlist_url = urljoin(PLAYLIST_URL, self.model_name)
+        # playlist_url = urljoin(PLAYLIST_URL, self.model_name)
+        playlist_url = f"https://edge144.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
         try:
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             lines = r.text.splitlines()
