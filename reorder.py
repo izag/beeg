@@ -6,7 +6,7 @@ import traceback
 import requests
 from aiohttp import ClientSession
 
-USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
+USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:73.0) Gecko/20100101 Firefox/73.0'
 
 REFERER = 'https://cbjpeg.stream.highwebmedia.com'
 
@@ -59,7 +59,8 @@ def get_room_list(filename, text):
                 print(f'{filename} : {i} of {total}')
                 i += 1
 
-                playlist_url = f"https://edge144.stream.highwebmedia.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
+                playlist_url = f"https://edge144.stream.highwebmedia.com/live-hls/amlst:{model.model_name}" \
+                               f"/playlist.m3u8"
                 response = http_session.get(playlist_url, timeout=TIMEOUT)
 
                 lines = response.text.splitlines()
@@ -154,7 +155,6 @@ if __name__ == "__main__":
     files = sys.argv[2: -1]
     output = sys.argv[-1]
 
-    html = ''
     with open(filepath, 'rb') as f:
         html = f.read().decode('utf-8')
 
@@ -169,7 +169,6 @@ if __name__ == "__main__":
     room_list = get_room_list_async(filepath, models)
 
     for file in files:
-        txt = ''
         with open(file, 'rb') as f:
             txt = f.read().decode('utf-8')
 
