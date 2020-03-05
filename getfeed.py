@@ -1,6 +1,7 @@
 import asyncio
 import re
 import shutil
+import sys
 import time
 
 from aiohttp import ClientSession
@@ -46,7 +47,7 @@ class Room:
         <a href="https://chaturbate.com/{self.model_name}/"> {self.model_name}</a>
         </div>
         <ul class="sub-info">
-        <li class="location">{self.bps}</li>
+        <li class="cams">{self.bps}</li>
         <li class="cams">{self.users}</li>
         </ul>
         <ul class="subject">
@@ -87,7 +88,7 @@ async def fetch_feed(num_pages):
 
 async def fetch_playlists(model_list):
     # create instance of Semaphore
-    sem = asyncio.Semaphore(4)
+    sem = asyncio.Semaphore(1)
     tasks = []
     async with ClientSession() as session:
         for model in model_list:
@@ -140,7 +141,13 @@ def get_room_list(text):
 
 
 if __name__ == "__main__":
-    feeds = get_feeds(10)
+    if len(sys.argv) < 3:
+        sys.exit(1)
+
+    npages = int(sys.argv[1])
+    page = sys.argv[2]
+
+    feeds = get_feeds(npages)
 
     room_list = []
     i = 1
@@ -161,3 +168,5 @@ if __name__ == "__main__":
 
     with open("tail.html", 'rb') as src, open(OUTPUT, 'ab') as dest:
         shutil.copyfileobj(src, dest)
+
+    shutil.copyfile(OUTPUT, page)
