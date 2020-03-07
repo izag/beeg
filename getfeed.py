@@ -63,7 +63,12 @@ async def fetch(url, session):
         if response.status != 200:
             if response.status != 403:
                 print(response.status, url)
+
+            if response.status == 503:
+                return '503'
+
             return b''
+
         return await response.read()
 
 
@@ -73,12 +78,12 @@ async def bound_fetch(sem, url, session):
         return await fetch(url, session)
 
 
-async def fetch_feed(num_pages):
+async def fetch_feed(start, finish):
     # create instance of Semaphore
     sem = asyncio.Semaphore(16)
     tasks = []
     async with ClientSession(headers=HEADERS) as session:
-        for page in range(1, num_pages + 1):
+        for page in range(start, finish + 1):
             url = f"https://sex-videochat.net/getfeeddata/chaturbate/?page={page}"
             task = asyncio.ensure_future(bound_fetch(sem, url, session))
             tasks.append(task)
@@ -99,27 +104,30 @@ async def fetch_playlists(model_list):
         return await asyncio.gather(*tasks)
 
 
-def get_feeds(num_pages):
+def get_feeds(start, finish):
     loop = asyncio.get_event_loop()
-    future = asyncio.ensure_future(fetch_feed(num_pages))
+    future = asyncio.ensure_future(fetch_feed(start, finish))
     return loop.run_until_complete(future)
 
 
-def get_room_list(text):
-    model_list = []
-    for match_obj in re.finditer(r'<div class="col-lg-2 col-md-4 col-sm-6 col-6 entry">\s*?'
-                                 r'<div class="thumbnail">(.*?)</div>\s*?</div>\s*?</div>\s*?</div>', text,
-                                 re.MULTILINE | re.DOTALL):
-        model_room = match_obj.group(1)
-        model_list.append(Room(model_room))
+def update_models_bps(model_list, tries):
+    if len(model_list) == 0:
+        return
+
+    print("try #", tries)
 
     loop = asyncio.get_event_loop()
     future = asyncio.ensure_future(fetch_playlists(model_list))
     results = zip(model_list, loop.run_until_complete(future))
 
+    failed = []
     for model, response in results:
         if len(response) == 0:
             model.log = 'Playlist is empty'
+            continue
+
+        if response == '503':
+            failed.append(model)
             continue
 
         lines = response.decode('utf-8').splitlines()
@@ -137,20 +145,34 @@ def get_room_list(text):
         best_bandwidth = chunks[2]
         model.bps = int(best_bandwidth[1:])
 
+    update_models_bps(failed, tries + 1)
+
+
+def get_room_list(text):
+    model_list = []
+    for match_obj in re.finditer(r'<div class="col-lg-2 col-md-4 col-sm-6 col-6 entry">\s*?'
+                                 r'<div class="thumbnail">(.*?)</div>\s*?</div>\s*?</div>\s*?</div>', text,
+                                 re.MULTILINE | re.DOTALL):
+        model_room = match_obj.group(1)
+        model_list.append(Room(model_room))
+
+    update_models_bps(model_list, 1)
+
     return model_list
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 4:
         sys.exit(1)
 
-    npages = int(sys.argv[1])
-    page = sys.argv[2]
+    beg = int(sys.argv[1])
+    fin = int(sys.argv[2])
+    page = sys.argv[3]
 
-    feeds = get_feeds(npages)
+    feeds = get_feeds(beg, fin)
 
     room_list = []
-    i = 1
+    i = beg
     for feed in feeds:
         print(i)
         i += 1

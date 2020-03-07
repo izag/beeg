@@ -650,6 +650,10 @@ class RecordSession(Thread):
         self.logger.debug(self.chunks_url)
         try:
             r = self.http_session.get(self.chunks_url, timeout=TIMEOUT)
+            if r.status_code != 200:
+                self.logger.debug(f"Status {r.status_code}: {self.chunks_url}")
+                return None
+
             lines = r.text.splitlines()
 
             if len(lines) < RecordSession.MIN_CHUNKS:
@@ -671,6 +675,9 @@ class RecordSession(Thread):
         try:
             session = POOL.get()
             with session.get(ts_url, stream=True, timeout=TIMEOUT) as r, open(file_path, 'wb') as fd:
+                if r.status_code != 200:
+                    self.logger.debug(f"Status {r.status_code}: {filename}")
+                    return
                 for chunk in r.iter_content(chunk_size=65536):
                     fd.write(chunk)
         except BaseException as error:
