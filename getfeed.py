@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import shutil
 import sys
@@ -14,6 +15,7 @@ HEADERS = {
 }
 
 OUTPUT = "output.html"
+CACHE = "cache.js"
 
 
 def search(pattern, string):
@@ -93,7 +95,7 @@ async def fetch_feed(start, finish):
 
 async def fetch_playlists(model_list):
     # create instance of Semaphore
-    sem = asyncio.Semaphore(1)
+    sem = asyncio.Semaphore(4)
     tasks = []
     async with ClientSession() as session:
         for model in model_list:
@@ -115,6 +117,9 @@ def update_models_bps(model_list, tries):
         return
 
     print("try #", tries)
+
+    if tries > 1:
+        time.sleep(1)
 
     loop = asyncio.get_event_loop()
     future = asyncio.ensure_future(fetch_playlists(model_list))
@@ -161,13 +166,39 @@ def get_room_list(text):
     return model_list
 
 
+def dump_cache(rooms):
+    cache_dict = {}
+    for model in rooms:
+        if model.bps == 0:
+            continue
+
+        cache_dict[model.model_name] = model.bps
+
+    with open(CACHE, "w") as f:
+        json.dump(cache_dict, f, indent=4)
+
+
+def print_results(rooms, page):
+    with open("head.html", 'rb') as src, open(OUTPUT, 'wb') as dest:
+        shutil.copyfileobj(src, dest)
+
+    with open(OUTPUT, 'ab') as f:
+        for room in rooms:
+            f.write(str(room).encode('utf-8'))
+
+    with open("tail.html", 'rb') as src, open(OUTPUT, 'ab') as dest:
+        shutil.copyfileobj(src, dest)
+
+    shutil.copyfile(OUTPUT, page)
+
+
 if __name__ == "__main__":
     if len(sys.argv) < 4:
         sys.exit(1)
 
     beg = int(sys.argv[1])
     fin = int(sys.argv[2])
-    page = sys.argv[3]
+    fileout = sys.argv[3]
 
     feeds = get_feeds(beg, fin)
 
@@ -177,18 +208,7 @@ if __name__ == "__main__":
         print(i)
         i += 1
         room_list += get_room_list(feed.decode('utf-8'))
-        time.sleep(1)
 
     room_list.sort(key=lambda x: (x.bps, x.users), reverse=True)
-
-    with open("head.html", 'rb') as src, open(OUTPUT, 'wb') as dest:
-        shutil.copyfileobj(src, dest)
-
-    with open(OUTPUT, 'ab') as f:
-        for room in room_list:
-            f.write(str(room).encode('utf-8'))
-
-    with open("tail.html", 'rb') as src, open(OUTPUT, 'ab') as dest:
-        shutil.copyfileobj(src, dest)
-
-    shutil.copyfile(OUTPUT, page)
+    dump_cache(room_list)
+    print_results(room_list, fileout)
