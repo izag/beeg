@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import shutil
 import sys
@@ -16,6 +17,7 @@ HEADERS = {
 
 OUTPUT = "output.html"
 CACHE = "cache.js"
+CACHE_DICT = {}
 
 
 def search(pattern, string):
@@ -200,6 +202,10 @@ if __name__ == "__main__":
     fin = int(sys.argv[2])
     fileout = sys.argv[3]
 
+    if os.path.exists(CACHE):
+        with open(CACHE, 'r') as f:
+            CACHE_DICT = json.load(f)
+
     feeds = get_feeds(beg, fin)
 
     room_list = []
@@ -210,5 +216,14 @@ if __name__ == "__main__":
         room_list += get_room_list(feed.decode('utf-8'))
 
     room_list.sort(key=lambda x: (x.bps, x.users), reverse=True)
-    dump_cache(room_list)
+
+    for room in room_list:
+        if room.bps == 0:
+            continue
+
+        CACHE_DICT[room.model_name] = room.bps
+
+    with open(CACHE, "w") as f:
+        json.dump(CACHE_DICT, f, indent=4)
+
     print_results(room_list, fileout)

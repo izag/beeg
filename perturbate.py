@@ -16,10 +16,8 @@ HEADERS = {
 
 OUTPUT = "output.html"
 CACHE = "cache.js"
-
-TIMEOUT = (3.05, 9.05)
-
 CACHE_DICT = {}
+TIMEOUT = (3.05, 9.05)
 
 
 def search(pattern, string):
