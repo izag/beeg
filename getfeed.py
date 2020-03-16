@@ -95,12 +95,21 @@ async def fetch_feed(start, finish):
         return await asyncio.gather(*tasks)
 
 
+async def done():
+    return "Done"
+
+
 async def fetch_playlists(model_list):
     # create instance of Semaphore
     sem = asyncio.Semaphore(4)
     tasks = []
     async with ClientSession() as session:
         for model in model_list:
+            if model.model_name in CACHE_DICT:
+                model.bps = CACHE_DICT[model.model_name]
+                tasks.append(asyncio.ensure_future(done()))
+                continue
+
             playlist_url = f"https://edge144.stream.highwebmedia.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
             task = asyncio.ensure_future(bound_fetch(sem, playlist_url, session))
             tasks.append(task)
@@ -133,6 +142,9 @@ def update_models_bps(model_list, tries):
             model.log = 'Playlist is empty'
             continue
 
+        if response == 'Done':
+            continue
+
         if response == '503':
             failed.append(model)
             continue
@@ -151,6 +163,8 @@ def update_models_bps(model_list, tries):
 
         best_bandwidth = chunks[2]
         model.bps = int(best_bandwidth[1:])
+        model.log = ''
+        CACHE_DICT[model.model_name] = model.bps
 
     update_models_bps(failed, tries + 1)
 
