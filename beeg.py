@@ -283,12 +283,16 @@ class MainWindow:
         if name not in values:
             return
 
+        idx = values.index(name)
+
         values.remove(name)
         self.cb_model['values'] = tuple(values)
         if len(values) == 0:
             self.cb_model.set('')
-        else:
+        elif idx == 0:
             self.cb_model.set(values[0])
+        else:
+            self.cb_model.set(values[idx - 1])
 
     def add_to_proxies(self, proxy):
         if len(self.cb_proxy['values']) == 0:
