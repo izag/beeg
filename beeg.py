@@ -8,12 +8,12 @@ from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
     StringVar
+from urllib.parse import urljoin
 
 import clipboard
 import requests
 from PIL import Image, ImageTk
 from requests import RequestException
-from requests.compat import urljoin
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
 
@@ -76,6 +76,7 @@ class MainWindow:
         self.hist_window = None
 
         self.model_name = None
+        self.resolution = None
         self.update_title()
 
         self.level = 0
@@ -88,7 +89,10 @@ class MainWindow:
         self.cb_model.bind("<Button-1>", self.drop_down_callback)
         self.cb_model.bind('<Return>', self.enter_callback)
         self.cb_model.focus_set()
-        self.cb_model.grid(row=self.level, column=0, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
+        self.cb_model.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.btn_add = Button(root, text="+", command=self.add_to_favorites)
+        self.btn_add.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_remove = Button(root, text="-", command=self.remove_from_favorites)
         self.btn_remove.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
@@ -96,9 +100,6 @@ class MainWindow:
         self.level += 1
         self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
         self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.cb_resolutions = ttk.Combobox(root, state="readonly", values=[])
-        self.cb_resolutions.grid(row=self.level, column=1, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_show_recording = Button(root,
@@ -167,24 +168,12 @@ class MainWindow:
 
         self.stop()
 
-        idx = self.cb_resolutions.current()
-
         success = self.update_model_info(True)
         if not success:
             self.set_default_state()
             return
 
-        items_count = len(self.cb_resolutions['value'])
-        if items_count == 0:
-            self.set_default_state()
-            return
-
-        if items_count <= idx or idx < 0:
-            idx = 0
-
-        self.cb_resolutions.current(idx)
-
-        self.session = RecordSession(self, self.base_url, self.model_name, self.cb_resolutions.get())
+        self.session = RecordSession(self, self.base_url, self.model_name, self.resolution)
         self.session.start()
 
         self.btn_stop.config(state=NORMAL)
@@ -193,6 +182,7 @@ class MainWindow:
         self.progress.start()
 
         self.update_title()
+        self.add_to_favorites()
 
         root.configure(background='green')
 
@@ -265,17 +255,33 @@ class MainWindow:
             self.add_to_proxies(proxy)
 
         self.img_url = HTTP_IMG_URL + self.model_name
-        self.add_to_history(self.model_name)
-
+        self.hist_logger.info(self.model_name)
         self.update_title()
 
         return True
 
-    def add_to_history(self, name):
-        if name not in self.cb_model['values']:
-            self.cb_model['values'] = (name, *self.cb_model['values'])
+    def add_to_favorites(self):
+        input_url = self.cb_model.get().strip()
 
-        self.hist_logger.info(name)
+        name = None
+        if input_url.startswith('https://edge'):
+            slash_pos = input_url.rfind('/')
+            b_url = input_url[: slash_pos + 1]
+            colon_pos = b_url.rfind(':', 0, -1)
+
+            sd_pos = b_url.find('-sd-', colon_pos)
+            if sd_pos == -1:
+                sd_pos = b_url.find('-ws-', colon_pos)
+
+            name = b_url[colon_pos + 1: sd_pos]
+        elif input_url.startswith('http'):
+            slash_pos = input_url[: -1].rfind('/')
+            name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
+        else:
+            name = input_url
+
+        if (len(name) > 0) and (name not in self.cb_model['values']):
+            self.cb_model['values'] = (name, *self.cb_model['values'])
 
     def remove_from_favorites(self):
         name = self.cb_model.get().strip()
@@ -327,11 +333,10 @@ class MainWindow:
             resolutions = [line for line in lines if not line.startswith("#")]
             resolutions.reverse()
 
-            self.cb_resolutions.configure(values=resolutions)
             if len(resolutions) == 0:
                 return False
 
-            self.cb_resolutions.current(0)
+            self.resolution = resolutions[0]
 
             actual_url = r.url
             slash_pos = actual_url.rfind('/')
@@ -402,6 +407,12 @@ class MainWindow:
 
         root.title(self.model_name or '<Undefined>')
 
+        if self.resolution is not None:
+            chunks = self.resolution.split('_')
+            if len(chunks) >= 3:
+                best_bandwidth = chunks[2][1:]
+                root.title(root.title() + " (" + best_bandwidth + ") ")
+
         if self.session is None:
             return
 
@@ -418,6 +429,7 @@ class MainWindow:
         self.image_label.config(image=None)
         self.model_name = None
         self.img_url = None
+        self.resolution = None
         self.update_title()
 
     def show_recording_model(self):

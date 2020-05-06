@@ -18,6 +18,7 @@ HEADERS = {
 OUTPUT = "output.html"
 CACHE = "cache.js"
 CACHE_DICT = {}
+THRESHOLD = 3096000
 
 
 def search(pattern, string):
@@ -200,6 +201,8 @@ def print_results(rooms, page):
 
     with open(OUTPUT, 'ab') as f:
         for room in rooms:
+            if THRESHOLD >= room.bps:
+                break
             f.write(str(room).encode('utf-8'))
 
     with open("tail.html", 'rb') as src, open(OUTPUT, 'ab') as dest:
