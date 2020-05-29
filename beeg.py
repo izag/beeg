@@ -419,7 +419,7 @@ class MainWindow:
         if not self.session.is_alive():
             return
 
-        if self.session.model_name != root.title():
+        if not root.title().startswith(self.session.model_name):
             return
 
         root.title(root.title() + " - Recording")
