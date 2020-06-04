@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import random
 import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -42,6 +43,21 @@ THREE_MONTHS = 3 * MONTH
 
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
 PLAYLIST_URL = "https://booloo.com/live/"
+
+EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
+         100, 101, 102, 103, 104, 106, 108, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126,
+         133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 150, 151, 152, 153, 154, 155, 156,
+         157, 158, 159, 160, 161, 162, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
+         180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201,
+         202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
+         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
+         246, 248, 249, 250, 251, 252, 253, 254, 256, 257, 259, 260, 261, 264, 266, 267, 268, 270, 271, 272, 273,
+         274, 275, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297,
+         298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319,
+         320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341,
+         342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352]
+
+random.seed()
 
 executor = ThreadPoolExecutor(max_workers=20)
 
@@ -325,7 +341,8 @@ class MainWindow:
 
     def get_resolutions(self):
         # playlist_url = urljoin(PLAYLIST_URL, self.model_name)
-        playlist_url = f"https://edge144.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
+        rnd = random.choice(EDGES)
+        playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
         try:
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             lines = r.text.splitlines()
@@ -369,10 +386,11 @@ class MainWindow:
             img_resized = img.resize((450, int(h * k)))
             root.after_idle(self.update_image, img_resized)
         except BaseException as error:
-            root.after_idle(self.set_undefined_state)
+            # root.after_idle(self.set_undefined_state)
             print("Exception URL: " + self.img_url)
             print(error)
             traceback.print_exc()
+            self.img_url = None
 
     def update_image(self, img):
         self.model_image = ImageTk.PhotoImage(img)
