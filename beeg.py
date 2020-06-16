@@ -1,3 +1,4 @@
+import datetime
 import io
 import logging
 import os
@@ -22,6 +23,8 @@ REFERER = 'https://cbjpeg.stream.highwebmedia.com'
 
 proxies = None
 
+REMEMBER_PROXIES = False
+
 HEADERS = {
     'User-agent': USER_AGENT,
     'Referer': REFERER
@@ -35,7 +38,11 @@ OUTPUT = "C:/tmp/"
 LOGS = "./logs/"
 
 ALL_TIME = 0
-DAY = 24 * 60 * 60
+HOUR = 60 * 60
+TWO_HOURS = 2 * HOUR
+SIX_HOURS = 6 * HOUR
+HALF_DAY = 12 * HOUR
+DAY = 24 * HOUR
 TWO_DAYS = 2 * DAY
 WEEK = 7 * DAY
 MONTH = 30 * DAY
@@ -50,11 +57,11 @@ EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98,
          157, 158, 159, 160, 161, 162, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
          180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201,
          202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
-         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245,
-         246, 248, 249, 250, 251, 252, 253, 254, 256, 257, 259, 260, 261, 264, 266, 267, 268, 270, 271, 272, 273,
+         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244,
+         248, 249, 250, 251, 252, 254, 256, 259, 260, 261, 266, 267, 270, 271, 272, 273,
          274, 275, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297,
          298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319,
-         320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341,
+         320, 321, 322, 323, 324, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341,
          342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352]
 
 random.seed()
@@ -78,6 +85,10 @@ class MainWindow:
 
         hist_menu = Menu(self.menu_bar, tearoff=0)
         hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
+        hist_menu.add_command(label="Last hour", command=lambda: self.show_full_history(HOUR))
+        hist_menu.add_command(label="Two hours", command=lambda: self.show_full_history(TWO_HOURS))
+        hist_menu.add_command(label="Six hours", command=lambda: self.show_full_history(SIX_HOURS))
+        hist_menu.add_command(label="Half day", command=lambda: self.show_full_history(HALF_DAY))
         hist_menu.add_command(label="Last day", command=lambda: self.show_full_history(DAY))
         hist_menu.add_command(label="Two days", command=lambda: self.show_full_history(TWO_DAYS))
         hist_menu.add_command(label="Week", command=lambda: self.show_full_history(WEEK))
@@ -116,6 +127,9 @@ class MainWindow:
         self.level += 1
         self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
         self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.btn_scan = Button(root, text="Scan On", command=self.toggle_scan)
+        self.btn_scan.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_show_recording = Button(root,
@@ -157,23 +171,27 @@ class MainWindow:
         self.base_url = None
         self.model_image = None
         self.img_url = None
+        self.scan_idx = -1
 
         self.hist_logger = logging.getLogger('history')
         self.hist_logger.setLevel(logging.INFO)
 
         self.fh_hist = logging.FileHandler(os.path.join(LOGS, f'hist_{int(time.time())}.log'))
         self.fh_hist.setLevel(logging.INFO)
+        formatter = logging.Formatter('%(asctime)s\t%(message)s')
+        self.fh_hist.setFormatter(formatter)
         self.hist_logger.addHandler(self.fh_hist)
 
-        self.proxy_logger = logging.getLogger('proxy')
-        self.proxy_logger.setLevel(logging.INFO)
+        if REMEMBER_PROXIES:
+            self.proxy_logger = logging.getLogger('proxy')
+            self.proxy_logger.setLevel(logging.INFO)
 
-        self.fh_proxy = logging.FileHandler(os.path.join(LOGS, f'proxy_{int(time.time())}.log'))
-        self.fh_proxy.setLevel(logging.INFO)
-        self.proxy_logger.addHandler(self.fh_proxy)
+            self.fh_proxy = logging.FileHandler(os.path.join(LOGS, f'proxy_{int(time.time())}.log'))
+            self.fh_proxy.setLevel(logging.INFO)
+            self.proxy_logger.addHandler(self.fh_proxy)
 
-        self.proxy_dict = {}
-        self.load_proxy_dict()
+            self.proxy_dict = {}
+            self.load_proxy_dict()
 
         self.hist_stack = []
 
@@ -267,7 +285,7 @@ class MainWindow:
                 self.set_undefined_state()
                 return False
 
-        if self.use_proxy.get() and len(proxy) != 0:
+        if self.use_proxy.get() and len(proxy) != 0 and REMEMBER_PROXIES:
             self.add_to_proxies(proxy)
 
         self.img_url = HTTP_IMG_URL + self.model_name
@@ -279,7 +297,6 @@ class MainWindow:
     def add_to_favorites(self):
         input_url = self.cb_model.get().strip()
 
-        name = None
         if input_url.startswith('https://edge'):
             slash_pos = input_url.rfind('/')
             b_url = input_url[: slash_pos + 1]
@@ -298,6 +315,7 @@ class MainWindow:
 
         if (len(name) > 0) and (name not in self.cb_model['values']):
             self.cb_model['values'] = (name, *self.cb_model['values'])
+            self.hist_logger.info(name)
 
     def remove_from_favorites(self):
         name = self.cb_model.get().strip()
@@ -369,6 +387,19 @@ class MainWindow:
         global executor
         global root
 
+        if self.scan_idx >= 0:
+            values = list(self.cb_model['values'])
+            max_idx = len(values)
+
+            if max_idx > 0:
+                if self.scan_idx >= max_idx:
+                    self.scan_idx = max_idx - 1
+
+                item = values[self.scan_idx]
+                root.title("Scanning: " + item)
+                self.img_url = HTTP_IMG_URL + item
+                self.scan_idx = (self.scan_idx + 1) % max_idx
+
         if (self.img_url is not None) or self.show_image:
             executor.submit(self.fetch_image)
 
@@ -404,8 +435,9 @@ class MainWindow:
         root.destroy()
         self.fh_hist.close()
         self.hist_logger.removeHandler(self.fh_hist)
-        self.fh_proxy.close()
-        self.proxy_logger.removeHandler(self.fh_proxy)
+        if REMEMBER_PROXIES:
+            self.fh_proxy.close()
+            self.proxy_logger.removeHandler(self.fh_proxy)
         self.http_session.close()
 
     def set_default_state(self):
@@ -509,6 +541,15 @@ class MainWindow:
         hist = sorted(self.proxy_dict.items(), key=lambda x: x[1], reverse=True)
         self.cb_proxy.configure(values=[x[0] for x in hist[:10]])
 
+    def toggle_scan(self):
+        if self.scan_idx >= 0:
+            self.scan_idx = -1
+            self.btn_scan.config(text="Scan On")
+            return
+
+        self.scan_idx = 0
+        self.btn_scan.config(text="Scan Off")
+
 
 def load_hist_dict(period):
     now = time.time()
@@ -530,7 +571,16 @@ def load_hist_dict(period):
 
         with open(full_path) as f:
             for line in f.readlines():
-                name = line.strip()
+                parts = line.strip().split('\t')
+                if len(parts) == 1:
+                    name = parts[0]
+                else:
+                    stamp = datetime.datetime.strptime(parts[0], '%Y-%m-%d %H:%M:%S,%f').timestamp()
+                    name = parts[1]
+                    diff = now - stamp
+                    if (period != ALL_TIME) and (diff > period):
+                        continue
+
                 count = res.get(name, 0)
                 res[name] = count + 1
 
