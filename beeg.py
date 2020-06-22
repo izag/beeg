@@ -34,6 +34,7 @@ TIMEOUT = (3.05, 9.05)
 DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
+N_REPEAT = 2
 OUTPUT = "C:/tmp/"
 LOGS = "./logs/"
 
@@ -128,6 +129,12 @@ class MainWindow:
         self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
         self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
+        self.btn_prev = Button(root, text="<< Prev", command=lambda: self.next_favorite(False))
+        self.btn_prev.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
+
+        self.btn_next = Button(root, text="Next >>", command=lambda: self.next_favorite(True))
+        self.btn_next.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
         self.btn_scan = Button(root, text="Scan On", command=self.toggle_scan)
         self.btn_scan.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
@@ -172,6 +179,7 @@ class MainWindow:
         self.model_image = None
         self.img_url = None
         self.scan_idx = -1
+        self.repeat = N_REPEAT
 
         self.hist_logger = logging.getLogger('history')
         self.hist_logger.setLevel(logging.INFO)
@@ -235,8 +243,7 @@ class MainWindow:
         clipboard.copy(self.cb_model.get())
 
     def paste_model_name(self):
-        self.cb_model.set(clipboard.paste())
-        self.cb_model.selection_range(0, END)
+        self.load_model(clipboard.paste(), True)
 
     def update_model_info(self, remember):
         global proxies
@@ -291,6 +298,7 @@ class MainWindow:
         self.img_url = HTTP_IMG_URL + self.model_name
         self.hist_logger.info(self.model_name)
         self.update_title()
+        self.set_scan(False)
 
         return True
 
@@ -398,7 +406,12 @@ class MainWindow:
                 item = values[self.scan_idx]
                 root.title("Scanning: " + item)
                 self.img_url = HTTP_IMG_URL + item
-                self.scan_idx = (self.scan_idx + 1) % max_idx
+
+                if self.repeat <= 0:
+                    self.scan_idx = (self.scan_idx + 1) % max_idx
+                    self.repeat = N_REPEAT
+
+                self.repeat -= 1
 
         if (self.img_url is not None) or self.show_image:
             executor.submit(self.fetch_image)
@@ -422,6 +435,7 @@ class MainWindow:
             print(error)
             traceback.print_exc()
             self.img_url = None
+            self.repeat = 0
 
     def update_image(self, img):
         self.model_image = ImageTk.PhotoImage(img)
@@ -486,9 +500,7 @@ class MainWindow:
         if self.session is None:
             return
 
-        self.cb_model.set(self.session.model_name)
-        self.cb_model.selection_range(0, END)
-        self.update_model_info(True)
+        self.load_model(self.session.model_name, True)
 
     def on_use_proxy_change(self, *args):
         if self.use_proxy.get():
@@ -505,6 +517,7 @@ class MainWindow:
             self.img_url = None
             self.image_label.grid_forget()
             self.show_image = False
+            self.set_scan(False)
         else:
             self.show_image = True
             self.image_label.grid(row=0, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
@@ -520,8 +533,7 @@ class MainWindow:
         if len(self.hist_stack) == 0:
             return
 
-        self.cb_model.set(self.hist_stack.pop())
-        self.update_model_info(False)
+        self.load_model(self.hist_stack.pop(), False)
 
     def load_proxy_dict(self):
         for file in os.listdir(LOGS):
@@ -542,13 +554,45 @@ class MainWindow:
         self.cb_proxy.configure(values=[x[0] for x in hist[:10]])
 
     def toggle_scan(self):
-        if self.scan_idx >= 0:
-            self.scan_idx = -1
-            self.btn_scan.config(text="Scan On")
+        self.set_scan(self.scan_idx < 0)
+
+    def set_scan(self, active):
+        if active:
+            name = self.cb_model.get().strip()
+            values = list(self.cb_model['values'])
+            sz = len(values)
+            if sz < 2:
+                return
+            if name not in values:
+                self.scan_idx = 0
+            else:
+                self.scan_idx = (values.index(name) + 1) % sz
+            self.repeat = N_REPEAT
+            self.btn_scan.config(text="Scan Off")
             return
 
-        self.scan_idx = 0
-        self.btn_scan.config(text="Scan Off")
+        self.scan_idx = -1
+        self.btn_scan.config(text="Scan On")
+
+    def next_favorite(self, forward):
+        name = self.cb_model.get().strip()
+        values = list(self.cb_model['values'])
+        sz = len(values)
+        if sz < 2:
+            return
+        if name not in values:
+            return
+
+        idx = values.index(name)
+        step = 1 if forward else -1
+        next_item = values[(idx + step) % sz]
+
+        self.load_model(next_item, True)
+
+    def load_model(self, model, remember):
+        self.cb_model.set(model)
+        self.cb_model.selection_range(0, END)
+        self.update_model_info(remember)
 
 
 def load_hist_dict(period):
@@ -657,7 +701,7 @@ class HistoryWindow:
 
         index = selected[0]
         value = w.get(index)
-        self.parent_window.cb_model.set(value)
+        self.parent_window.load_model(value, True)
 
     def lift(self):
         self.window.lift()
