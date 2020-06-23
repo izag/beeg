@@ -304,29 +304,15 @@ class MainWindow:
 
     def add_to_favorites(self):
         input_url = self.cb_model.get().strip()
-
-        if input_url.startswith('https://edge'):
-            slash_pos = input_url.rfind('/')
-            b_url = input_url[: slash_pos + 1]
-            colon_pos = b_url.rfind(':', 0, -1)
-
-            sd_pos = b_url.find('-sd-', colon_pos)
-            if sd_pos == -1:
-                sd_pos = b_url.find('-ws-', colon_pos)
-
-            name = b_url[colon_pos + 1: sd_pos]
-        elif input_url.startswith('http'):
-            slash_pos = input_url[: -1].rfind('/')
-            name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
-        else:
-            name = input_url
+        name = get_model_name(input_url)
 
         if (len(name) > 0) and (name not in self.cb_model['values']):
             self.cb_model['values'] = (name, *self.cb_model['values'])
             self.hist_logger.info(name)
 
     def remove_from_favorites(self):
-        name = self.cb_model.get().strip()
+        input_url = self.cb_model.get().strip()
+        name = get_model_name(input_url)
         values = list(self.cb_model['values'])
         if name not in values:
             return
@@ -558,7 +544,8 @@ class MainWindow:
 
     def set_scan(self, active):
         if active:
-            name = self.cb_model.get().strip()
+            input_url = self.cb_model.get().strip()
+            name = get_model_name(input_url)
             values = list(self.cb_model['values'])
             sz = len(values)
             if sz < 2:
@@ -575,7 +562,8 @@ class MainWindow:
         self.btn_scan.config(text="Scan On")
 
     def next_favorite(self, forward):
-        name = self.cb_model.get().strip()
+        input_url = self.cb_model.get().strip()
+        name = get_model_name(input_url)
         values = list(self.cb_model['values'])
         sz = len(values)
         if sz < 2:
@@ -629,6 +617,24 @@ def load_hist_dict(period):
                 res[name] = count + 1
 
     return res
+
+
+def get_model_name(input_url):
+    if input_url.startswith('https://edge'):
+        slash_pos = input_url.rfind('/')
+        b_url = input_url[: slash_pos + 1]
+        colon_pos = b_url.rfind(':', 0, -1)
+
+        sd_pos = b_url.find('-sd-', colon_pos)
+        if sd_pos == -1:
+            sd_pos = b_url.find('-ws-', colon_pos)
+
+        return b_url[colon_pos + 1: sd_pos]
+    elif input_url.startswith('http'):
+        slash_pos = input_url[: -1].rfind('/')
+        return input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
+    else:
+        return input_url
 
 
 class HistoryWindow:
