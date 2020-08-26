@@ -663,8 +663,8 @@ async def fetch(url, session):
                 return ''
 
             return await response.read()
-    except ServerTimeoutError as ste:
-        print(ste, url)
+    except (ClientConnectorError, ServerTimeoutError) as e:
+        print(e, url)
         return 'Retry'
     except BaseException as error:
         print(error)

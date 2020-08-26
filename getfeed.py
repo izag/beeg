@@ -9,7 +9,7 @@ import time
 import traceback
 
 import aiohttp
-from aiohttp import ClientSession, ServerTimeoutError
+from aiohttp import ClientSession, ServerTimeoutError, ClientConnectorError
 
 HEADERS = {
     'User-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:79.0) Gecko/20100101 Firefox/79.0',
@@ -67,12 +67,12 @@ class Room:
     def __str__(self):
         return f"""
         <li class="room_list_room" >
-        <a href="https://chaturbate.me/{self.model_name}/">
+        <a href="http://chaturbate.me/{self.model_name}/">
         <img src="https://roomimg.stream.highwebmedia.com/ri/{self.model_name}.jpg" width="180" height="135" class="png" />
         </a>
         <div class="details">
         <div class="title">
-        <a href="https://chaturbate.me/{self.model_name}/"> {self.model_name}</a>
+        <a href="http://chaturbate.me/{self.model_name}/"> {self.model_name}</a>
         </div>
         <ul class="sub-info">
         <li class="cams">{self.bps}</li>
@@ -99,8 +99,8 @@ async def fetch(url, session):
                 return ''
 
             return await response.read()
-    except ServerTimeoutError as ste:
-        print(ste, url)
+    except (ClientConnectorError, ServerTimeoutError) as e:
+        print(e, url)
         return 'Retry'
     except BaseException as error:
         print(error)
