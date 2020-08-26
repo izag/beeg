@@ -1,3 +1,4 @@
+import asyncio
 import datetime
 import io
 import logging
@@ -12,9 +13,11 @@ from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu,
     StringVar
 from urllib.parse import urljoin
 
+import aiohttp
 import clipboard
 import requests
 from PIL import Image, ImageTk
+from aiohttp import ClientSession, ClientConnectorError, ServerTimeoutError
 from requests import RequestException
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
@@ -34,7 +37,7 @@ TIMEOUT = (3.05, 9.05)
 DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
-N_REPEAT = 2
+N_REPEAT = 3
 OUTPUT = "C:/tmp/"
 LOGS = "./logs/"
 
@@ -52,18 +55,18 @@ THREE_MONTHS = 3 * MONTH
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
 PLAYLIST_URL = "https://booloo.com/live/"
 
-EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
-         100, 101, 102, 103, 104, 106, 108, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126,
-         133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 150, 151, 152, 153, 154, 155, 156,
-         157, 158, 159, 160, 161, 162, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179,
-         180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201,
-         202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223,
-         224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244,
-         248, 249, 250, 251, 252, 254, 256, 259, 260, 261, 266, 267, 270, 271, 272, 273,
-         274, 275, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297,
-         298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319,
-         320, 321, 322, 323, 324, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341,
-         342, 343, 344, 345, 346, 347, 348, 349, 350, 351, 352]
+EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 106, 108,
+         109, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126, 133, 134, 135, 136, 137, 138, 139,
+         140, 141, 142, 143, 144, 145, 146, 147, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 164,
+         165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186,
+         187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208,
+         209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230,
+         231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 248, 249, 250, 251, 252, 253,
+         254, 256, 257, 259, 260, 261, 264, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 278, 279, 280, 281, 282,
+         283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304,
+         305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326,
+         327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348,
+         349, 350, 351, 352]
 
 random.seed()
 
@@ -288,6 +291,9 @@ class MainWindow:
 
         if self.base_url is None:
             success = self.get_resolutions()
+            if not success:
+                success = self.get_resolutions()
+
             if not success:
                 self.set_undefined_state()
                 return False
@@ -637,7 +643,90 @@ def get_model_name(input_url):
         return input_url
 
 
+class Model:
+    def __init__(self, pos, name):
+        self.model_name = name
+        self.pos = pos
+        self.is_online = False
+
+
+async def fetch(url, session):
+    try:
+        async with session.get(url) as response:
+            if response.status != 200:
+                if response.status != 403:
+                    print(response.status, url)
+
+                if response.status == 503 or response.status == 502:
+                    return 'Retry'
+
+                return ''
+
+            return await response.read()
+    except ServerTimeoutError as ste:
+        print(ste, url)
+        return 'Retry'
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
+        return ''
+
+
+async def bound_fetch(sem, url, session):
+    # Getter function with semaphore.
+    async with sem:
+        return await fetch(url, session)
+
+
+async def fetch_playlists(model_list):
+    # create instance of Semaphore
+    sem = asyncio.Semaphore(16)
+    tasks = []
+    rnd_sample = random.sample(EDGES, len(model_list))
+    time_out = aiohttp.ClientTimeout(sock_connect=2.05, sock_read=3.05)
+    async with ClientSession(timeout=time_out) as session:
+        for rnd, model in zip(rnd_sample, model_list):
+            playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
+            task = asyncio.ensure_future(bound_fetch(sem, playlist_url, session))
+            tasks.append(task)
+
+        return await asyncio.gather(*tasks)
+
+
+def update_models_bps(model_list, tries):
+    if len(model_list) == 0:
+        return
+
+    print("try #", tries)
+
+    if tries > 1:
+        time.sleep(1)
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError as e:
+        loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    future = asyncio.ensure_future(fetch_playlists(model_list))
+    results = zip(model_list, loop.run_until_complete(future))
+
+    failed = []
+    for model, response in results:
+        if len(response) == 0:
+            model.is_online = False
+            continue
+
+        if response == 'Retry':
+            failed.append(model)
+            continue
+
+        model.is_online = True
+
+    update_models_bps(failed, tries + 1)
+
+
 class HistoryWindow:
+    MAX_QUERY_SIZE = 64
 
     def __init__(self, parent, win, hist_dict):
         self.window = win
@@ -649,13 +738,21 @@ class HistoryWindow:
         frm_top = Frame(win)
         frm_bottom = Frame(win)
 
+        self.btn_test = Button(frm_top, text="Test", command=self.on_test)
+        self.btn_test.grid(row=1, column=1, sticky=W + E)
+
+        self.progress = ttk.Progressbar(frm_top, orient=HORIZONTAL, length=30, mode='indeterminate')
+
+        self.btn_test_next = Button(frm_top, text="Test Next", command=self.on_test_next)
+        self.btn_test_next.grid(row=1, column=4, sticky=W + E)
+
         self.search = StringVar()
         self.search.trace("w", lambda name, index, mode, sv=self.search: self.on_search(sv))
-        self.entry_search = Entry(frm_top, textvariable=self.search, width=57)
-        self.entry_search.pack(side=LEFT, fill=BOTH, expand=1)
+        self.entry_search = Entry(frm_top, textvariable=self.search, width=52)
+        self.entry_search.grid(row=2, column=1, columnspan=3, sticky=W + E)
 
         self.btn_clear = Button(frm_top, text="Clear", command=self.on_clear)
-        self.btn_clear.pack(side=RIGHT, fill=BOTH, expand=1)
+        self.btn_clear.grid(row=2, column=4, sticky=W + E)
 
         self.list_box = Listbox(frm_bottom, width=60, height=40, selectmode=SINGLE)
         self.list_box.pack(side=LEFT, fill=BOTH, expand=1)
@@ -669,6 +766,8 @@ class HistoryWindow:
 
         self.window.bind("<FocusIn>", self.focus_callback)
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.test_online_start = 0
 
         self.fill_list_box()
 
@@ -720,6 +819,49 @@ class HistoryWindow:
     def focus_callback(self, event):
         self.entry_search.selection_range(0, END)
         root.lift()
+
+    def test_online(self, model_list):
+        global root
+
+        update_models_bps(model_list, 1)
+        root.after_idle(self.update_listbox, model_list)
+
+    def update_listbox(self, model_list):
+        for model in model_list:
+            self.list_box.itemconfig(model.pos, {'fg': 'red' if model.is_online else 'blue'})
+        self.set_controls_state(NORMAL)
+
+    def on_test(self):
+        self.test_online_start = 0
+        for i in range(self.list_box.size()):
+            self.list_box.itemconfig(i, {'fg': 'black'})
+
+        self.on_test_next()
+
+    def on_test_next(self):
+        items = self.list_box.get(self.test_online_start, self.test_online_start + HistoryWindow.MAX_QUERY_SIZE - 1)
+
+        model_list = []
+        for i, name in zip(range(self.test_online_start, self.test_online_start + len(items)), items):
+            model_list.append(Model(i, name))
+
+        self.test_online_start += HistoryWindow.MAX_QUERY_SIZE
+        self.set_controls_state(DISABLED)
+
+        executor.submit(self.test_online, model_list)
+
+    def set_controls_state(self, state):
+        self.btn_test.config(state=state)
+        self.btn_test_next.config(state=state)
+        self.btn_clear.config(state=state)
+        self.entry_search.config(state=state)
+
+        if state == DISABLED:
+            self.progress.grid(row=1, column=2, columnspan=2, sticky=W + E)
+            self.progress.start()
+        else:
+            self.progress.grid_forget()
+            self.progress.stop()
 
 
 class Chunks:
