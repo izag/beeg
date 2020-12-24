@@ -67,12 +67,12 @@ class Room:
     def __str__(self):
         return f"""
         <li class="room_list_room" >
-        <a href="http://chaturbate.me/{self.model_name}/">
+        <a href="http://chaturbate.jjgirls.com/{self.model_name}/">
         <img src="https://roomimg.stream.highwebmedia.com/ri/{self.model_name}.jpg" width="180" height="135" class="png" />
         </a>
         <div class="details">
         <div class="title">
-        <a href="http://chaturbate.me/{self.model_name}/"> {self.model_name}</a>
+        <a href="http://chaturbate.jjgirls.com/{self.model_name}/"> {self.model_name}</a>
         </div>
         <ul class="sub-info">
         <li class="cams">{self.bps}</li>
