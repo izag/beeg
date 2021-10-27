@@ -503,16 +503,20 @@ class MainWindow:
             self.cb_proxy.config(state=DISABLED)
 
     def toggle_image(self):
+        global root
+
         if self.show_image:
             self.model_image = None
             self.image_label.config(image=None)
             self.img_url = None
-            self.image_label.grid_forget()
+            # self.image_label.grid_forget()
+            self.image_label.place_forget()
             self.show_image = False
             self.set_scan(False)
         else:
             self.show_image = True
-            self.image_label.grid(row=0, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
+            # self.image_label.grid(row=0, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
+            self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
             self.update_model_info(True)
 
     def show_full_history(self, period):
@@ -733,7 +737,7 @@ class HistoryWindow:
         self.parent_window = parent
         self.hist_dict = hist_dict
         self.window.title("Full history")
-        self.window.resizable(False, False)
+        # self.window.resizable(False, False)
 
         frm_top = Frame(win)
         frm_bottom = Frame(win)
@@ -1014,6 +1018,6 @@ if __name__ == "__main__":
     if not os.path.exists(LOGS):
         os.mkdir(LOGS)
 
-    root.resizable(False, False)
+    # root.resizable(False, False)
     my_gui = MainWindow()
     root.mainloop()
