@@ -20,7 +20,7 @@ from PIL import Image, ImageTk
 from aiohttp import ClientSession, ClientConnectorError, ServerTimeoutError
 from requests import RequestException
 
-USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:68.0) Gecko/20100101 Firefox/68.0'
+USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:93.0) Gecko/20100101 Firefox/93.0'
 
 REFERER = 'https://cbjpeg.stream.highwebmedia.com'
 
@@ -29,7 +29,7 @@ proxies = None
 REMEMBER_PROXIES = False
 
 HEADERS = {
-    'User-agent': USER_AGENT,
+    'User-Agent': USER_AGENT,
     'Referer': REFERER
 }
 
@@ -38,7 +38,7 @@ DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = "C:/tmp/"
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -53,7 +53,6 @@ MONTH = 30 * DAY
 THREE_MONTHS = 3 * MONTH
 
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
-PLAYLIST_URL = "https://booloo.com/live/"
 
 EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 106, 108,
          109, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126, 133, 134, 135, 136, 137, 138, 139,
@@ -148,15 +147,8 @@ class MainWindow:
                                          state=DISABLED)
         self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.use_proxy = BooleanVar()
-        self.use_proxy.set(False)
-        self.use_proxy.trace('w', self.on_use_proxy_change)
-
-        self.chk_use_proxy = Checkbutton(text='Use proxy', variable=self.use_proxy)
-        self.chk_use_proxy.grid(row=self.level, column=1, sticky=W, padx=PAD, pady=PAD)
-
-        self.cb_proxy = ttk.Combobox(root, width=30, state=DISABLED)
-        self.cb_proxy.grid(row=self.level, column=2, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_shrink = Button(root, text="><", command=self.on_shrink)
+        self.btn_shrink.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_start = Button(root, text="Start", command=self.on_btn_start)
@@ -206,6 +198,7 @@ class MainWindow:
 
         self.hist_stack = []
 
+        self.toggle_image()
         self.load_image()
 
     def on_btn_start(self):
@@ -249,8 +242,6 @@ class MainWindow:
         self.load_model(clipboard.paste(), True)
 
     def update_model_info(self, remember):
-        global proxies
-
         if remember and (self.model_name is not None):
             if len(self.hist_stack) == 0 or (self.model_name != self.hist_stack[-1]):
                 self.hist_stack.append(self.model_name)
@@ -262,15 +253,6 @@ class MainWindow:
         if len(input_url) == 0:
             self.set_undefined_state()
             return False
-
-        proxy = self.cb_proxy.get().strip()
-        if self.use_proxy.get() and len(proxy.strip()) != 0:
-            proxies = {
-                "http": "http://" + proxy,
-                "https": "https://" + proxy
-            }
-        else:
-            proxies = None
 
         self.base_url = None
         if input_url.startswith('https://edge'):
@@ -297,9 +279,6 @@ class MainWindow:
             if not success:
                 self.set_undefined_state()
                 return False
-
-        if self.use_proxy.get() and len(proxy) != 0 and REMEMBER_PROXIES:
-            self.add_to_proxies(proxy)
 
         self.img_url = HTTP_IMG_URL + self.model_name
         self.hist_logger.info(self.model_name)
@@ -358,11 +337,13 @@ class MainWindow:
         self.update_model_info(True)
 
     def get_resolutions(self):
-        # playlist_url = urljoin(PLAYLIST_URL, self.model_name)
         rnd = random.choice(EDGES)
         playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
         try:
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
+            if r.status_code == 302:
+                redirect_url = r.headers['Location']
+                r = self.http_session.get(redirect_url, timeout=TIMEOUT)
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -427,6 +408,7 @@ class MainWindow:
             print(error)
             traceback.print_exc()
             self.img_url = None
+            self.model_image = None
             self.repeat = 0
 
     def update_image(self, img):
@@ -591,6 +573,9 @@ class MainWindow:
         self.cb_model.set(model)
         self.cb_model.selection_range(0, END)
         self.update_model_info(remember)
+
+    def on_shrink(self):
+        pass
 
 
 def load_hist_dict(period):
@@ -1017,6 +1002,8 @@ class RecordSession(Thread):
 if __name__ == "__main__":
     if not os.path.exists(LOGS):
         os.mkdir(LOGS)
+    if not os.path.exists(OUTPUT):
+        os.mkdir(OUTPUT)
 
     # root.resizable(False, False)
     my_gui = MainWindow()
