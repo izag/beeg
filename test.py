@@ -3,7 +3,10 @@ import random
 import time
 import tkinter as tk
 import traceback
+from tkinter import CENTER, N
+from tkinter.ttk import Label
 
+from PIL.ImageTk import PhotoImage
 from aiohttp import ClientSession
 
 EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
@@ -135,8 +138,32 @@ def demo(master):
     listbox.itemconfig(0, foreground="purple")
 
 
+root = tk.Tk()
+
+
+def test_transparancy():
+    global root
+
+    root.geometry('{}x{}'.format(480, 320))
+
+    background_img = PhotoImage(file="assets/rec1.png")
+    scanbtn_img = PhotoImage(file="assets/rec2.png")
+
+    Label(root, compound=N, image=background_img).place(x=0, y=0, relwidth=1, relheight=1)
+
+    # background.image = background_img  # keep a reference!
+    Label(root, image=scanbtn_img).pack()
+
+    root.mainloop()
+
+
+def quit_app():
+    root.destroy()
+
+
 if __name__ == "__main__":
     # root = tk.Tk()
     # demo(root)
     # root.mainloop()
-    test_online(TEST_DATA)
+    # test_online(TEST_DATA)
+    test_transparancy()

@@ -10,7 +10,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
-    StringVar
+    StringVar, Canvas
 from urllib.parse import urljoin
 
 import aiohttp
@@ -151,8 +151,14 @@ class MainWindow:
         self.btn_shrink.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
-        self.btn_start = Button(root, text="Start", command=self.on_btn_start)
+        img = Image.open('assets/rec2.png')
+        w, h = img.size
+        self.img_record = ImageTk.PhotoImage(img)
+        self.btn_start = Button(root, text="Start", image=self.img_record, command=self.on_btn_start)
         self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        # self.canvas = Canvas(root, width=w, height=h)
+        # self.canvas.create_image(10, 10, image=self.img_record)
+        # self.canvas.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
         self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
