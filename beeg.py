@@ -8,7 +8,7 @@ import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
-from tkinter import Tk, Button, ttk, W, E, Image, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
+from tkinter import Tk, Button, ttk, W, E, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
     StringVar, Canvas
 from urllib.parse import urljoin

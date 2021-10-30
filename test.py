@@ -1,12 +1,11 @@
 import asyncio
 import random
 import time
-import tkinter as tk
 import traceback
-from tkinter import CENTER, N
+from tkinter import CENTER, N, Tk, Canvas, HIDDEN, NORMAL
 from tkinter.ttk import Label
 
-from PIL.ImageTk import PhotoImage
+from PIL import ImageTk, Image
 from aiohttp import ClientSession
 
 EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
@@ -138,23 +137,79 @@ def demo(master):
     listbox.itemconfig(0, foreground="purple")
 
 
-root = tk.Tk()
+root = Tk()
 
 
 def test_transparancy():
     global root
 
-    root.geometry('{}x{}'.format(480, 320))
+    img_background = ImageTk.PhotoImage(file="assets/rec1.png")
+    img_record = ImageTk.PhotoImage(file="assets/rec2.png")
+    img_bee = Image.open("assets/_blackbee_.jpg")
+    # img_rec = Image.open("assets/rec3.gif")
+    img_canbe = Image.open("assets/canbebought.jpg")
 
-    background_img = PhotoImage(file="assets/rec1.png")
-    scanbtn_img = PhotoImage(file="assets/rec2.png")
+    maxwidth = 200
+    maxheight = 120
+    img = fit_image(img_bee, maxwidth, maxheight)
+    # img_rec = fit_image(img_rec, maxwidth, maxheight)
 
-    Label(root, compound=N, image=background_img).place(x=0, y=0, relwidth=1, relheight=1)
+    width, height = img.size
+    root.geometry('{}x{}'.format(width, height))
+    root.overrideredirect(True)
 
-    # background.image = background_img  # keep a reference!
-    Label(root, image=scanbtn_img).pack()
+    # Label(root, compound=N, image=background_img).place(x=0, y=0, relwidth=1, relheight=1)
+    #
+    # # background.image = background_img  # keep a reference!
+    # Label(root, image=scanbtn_img).pack()
 
+    canvas = Canvas(root, width=width, height=height, bd=0, highlightthickness=0)
+
+    x_center = width // 2
+    y_center = height // 2
+    photo_img = ImageTk.PhotoImage(img)
+    canvas.create_image(x_center, y_center, image=photo_img)
+    # image_id = canvas.create_image(50, 50, image=img_record)
+
+    # id_red_circle = canvas.create_oval(width - 30, 10, width - 10, 30, fill='red')
+    id_red_frame = canvas.create_polygon(5, 5, width - 5, 5, width - 5, height - 5, 5, height - 5,
+                                         outline='red',
+                                         width=10,
+                                         fill='')
+
+    # photo_img_rec = ImageTk.PhotoImage(img_rec, format="gif -index 3")
+    # canvas.create_image(x_center, y_center, image=photo_img_rec)
+
+    # canvas.move(image_id, 245, 100)
+
+    canvas.pack()
+
+    root.after(333, blink, canvas, id_red_frame)
     root.mainloop()
+
+
+def blink(canvas, id_figure):
+    state = canvas.itemcget(id_figure, 'state')
+    if state != HIDDEN:
+        canvas.itemconfigure(id_figure, state=HIDDEN)
+    else:
+        canvas.itemconfigure(id_figure, state=NORMAL)
+    root.after(333, blink, canvas, id_figure)
+
+
+def fit_image(img, maxwidth, maxheight):
+    width, height = img.size
+
+    if width > height:
+        scalingfactor = maxwidth / width
+        width = maxwidth
+        height = int(height * scalingfactor)
+    else:
+        scalingfactor = maxheight / height
+        height = maxheight
+        width = int(width * scalingfactor)
+
+    return img.resize((width, height), Image.ANTIALIAS)
 
 
 def quit_app():
