@@ -145,9 +145,9 @@ def test_transparancy():
 
     img_background = ImageTk.PhotoImage(file="assets/rec1.png")
     img_record = ImageTk.PhotoImage(file="assets/rec2.png")
-    img_bee = Image.open("assets/_blackbee_.jpg")
+    img_bee = Image.open("assets/girl.jpg")
     # img_rec = Image.open("assets/rec3.gif")
-    img_canbe = Image.open("assets/canbebought.jpg")
+    # img_canbe = Image.open("assets/canbebought.jpg")
 
     maxwidth = 200
     maxheight = 120
