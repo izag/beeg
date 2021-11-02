@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import HIDDEN, NORMAL
+from tkinter import HIDDEN, NORMAL, Button, LEFT, TOP, NW
 from ctypes import windll
 from PIL import Image, ImageTk
 
@@ -36,8 +36,13 @@ class App(tk.Tk):
                                                     outline='red',
                                                     width=10,
                                                     fill='')
-        self.canvas.pack()
-        self.canvas.addtag_all("all")
+
+        img = Image.open('assets/rec_small.png')
+        self.img_record = ImageTk.PhotoImage(img)
+        self.btn_start = Button(self, image=self.img_record)
+        # self.btn_start.pack()
+
+        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
 
         self.after(333, self.blink, self.canvas, self.id_rect)
 
@@ -48,8 +53,8 @@ class App(tk.Tk):
         self.bind("<ButtonRelease-1>", self.stop_move)
         self.bind("<B1-Motion>", self.do_move)
         self.bind("<Configure>", self.on_resize)
-        # self.bind('<Enter>', self.on_enter)
-        # self.bind('<Leave>', self.on_leave)
+        self.bind('<Enter>', self.on_enter)
+        self.bind('<Leave>', self.on_leave)
 
     def start_move(self, event):
         self.x = event.x
@@ -75,18 +80,20 @@ class App(tk.Tk):
         self.after(333, self.blink, canvas, id_figure)
 
     def on_enter(self, event):
-        self.overrideredirect(False)
+        # self.overrideredirect(False)
+        self.btn_start.pack(side=TOP, anchor=NW)
 
     def on_leave(self, event):
-        self.overrideredirect(True)
-        self.set_appwindow()
+        # self.overrideredirect(True)
+        # self.set_appwindow()
+        self.btn_start.pack_forget()
 
     def on_resize(self, event):
         self.canvas.config(width=event.width, height=event.height)
         img = fit_image(self.img_orig, event.width, event.height)
         self.photo_img = ImageTk.PhotoImage(img)
         self.canvas.itemconfigure(self.bg_img, image=self.photo_img)
-        self.canvas.moveto(self.bg_img, 0, 0)
+        self.canvas.coords(self.bg_img, event.width // 2, event.height // 2)
         self.canvas.coords(self.id_rect, 5, 5, event.width - 5, event.height - 5)
 
     def set_appwindow(self):
