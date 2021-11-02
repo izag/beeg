@@ -14,8 +14,8 @@ WS_EX_TOOLWINDOW = 0x00000080
 class App(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
-        self.overrideredirect(True)
-        self.set_appwindow()
+        # self.overrideredirect(True)
+        # self.set_appwindow()
         self.x = None
         self.y = None
 
@@ -39,7 +39,6 @@ class App(tk.Tk):
         self.canvas.pack()
         self.canvas.addtag_all("all")
 
-
         self.after(333, self.blink, self.canvas, self.id_rect)
 
         w_orig, h_orig = self.img_orig.size
@@ -49,8 +48,8 @@ class App(tk.Tk):
         self.bind("<ButtonRelease-1>", self.stop_move)
         self.bind("<B1-Motion>", self.do_move)
         self.bind("<Configure>", self.on_resize)
-        self.bind('<Enter>', self.on_enter)
-        self.bind('<Leave>', self.on_leave)
+        # self.bind('<Enter>', self.on_enter)
+        # self.bind('<Leave>', self.on_leave)
 
     def start_move(self, event):
         self.x = event.x
