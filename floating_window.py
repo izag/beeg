@@ -15,15 +15,16 @@ class App(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
         # self.overrideredirect(True)
-        # self.set_appwindow()
         self.x = None
         self.y = None
+        self.is_original = False
 
         self.img_orig = Image.open("assets/girl.jpg")
+        self.w_orig, self.h_orig = self.img_orig.size
         img = fit_image(self.img_orig, INIT_WIDTH, INIT_HEIGHT)
         width, height = img.size
 
-        self.geometry('{}x{}'.format(width, height))
+        self.geometry(f'{width}x{height}')
 
         self.canvas = tk.Canvas(self, width=width, height=height, bd=0, highlightthickness=0)
 
@@ -32,22 +33,22 @@ class App(tk.Tk):
         self.photo_img = ImageTk.PhotoImage(img)
         self.bg_img = self.canvas.create_image(x_center, y_center, image=self.photo_img)
 
-        self.id_rect = self.canvas.create_rectangle(5, 5, width - 5, height - 5,
+        self.id_rect = self.canvas.create_rectangle(4, 4, width - 4, height - 4,
                                                     outline='red',
-                                                    width=10,
+                                                    width=8,
                                                     fill='')
 
         img = Image.open('assets/rec_small.png')
         self.img_record = ImageTk.PhotoImage(img)
         self.btn_start = Button(self, image=self.img_record)
-        # self.btn_start.pack()
+        # self.btn_start.pack(side=TOP, anchor=NW)
 
         self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
 
         self.after(333, self.blink, self.canvas, self.id_rect)
 
-        w_orig, h_orig = self.img_orig.size
-        self.maxsize(w_orig, h_orig)
+        # w_orig, h_orig = self.img_orig.size
+        # self.maxsize(w_orig, h_orig)
 
         self.bind("<ButtonPress-1>", self.start_move)
         self.bind("<ButtonRelease-1>", self.stop_move)
@@ -55,6 +56,10 @@ class App(tk.Tk):
         self.bind("<Configure>", self.on_resize)
         self.bind('<Enter>', self.on_enter)
         self.bind('<Leave>', self.on_leave)
+        # self.bind('<Double-Button-1>', self.on_double_click)
+
+        self.after(333, self.blink, self.canvas, self.id_rect)
+        # self.after(100, self.set_appwindow)
 
     def start_move(self, event):
         self.x = event.x
@@ -81,7 +86,10 @@ class App(tk.Tk):
 
     def on_enter(self, event):
         # self.overrideredirect(False)
+        # width = self.winfo_width()
+        # height = self.winfo_height()
         self.btn_start.pack(side=TOP, anchor=NW)
+        # self.geometry(f'{width}x{height}')
 
     def on_leave(self, event):
         # self.overrideredirect(True)
@@ -95,6 +103,15 @@ class App(tk.Tk):
         self.canvas.itemconfigure(self.bg_img, image=self.photo_img)
         self.canvas.coords(self.bg_img, event.width // 2, event.height // 2)
         self.canvas.coords(self.id_rect, 5, 5, event.width - 5, event.height - 5)
+
+    # def on_double_click(self, event):
+    #     width = INIT_WIDTH
+    #     height = INIT_HEIGHT
+    #     if self.is_original:
+    #         width = self.w_orig
+    #         height = self.h_orig
+    #     self.geometry(f'{width}x{height}')
+    #     self.is_original = not self.is_original
 
     def set_appwindow(self):
         hwnd = windll.user32.GetParent(self.winfo_id())
