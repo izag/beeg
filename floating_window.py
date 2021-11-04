@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import HIDDEN, NORMAL, Button, LEFT, TOP, NW, NSEW, CENTER
+from tkinter import HIDDEN, NORMAL, Button, LEFT, TOP, NW, NSEW, CENTER, NE, SE, BOTTOM, RIGHT, SW
 from ctypes import windll
 from PIL import Image, ImageTk
 
@@ -14,9 +14,8 @@ WS_EX_TOOLWINDOW = 0x00000080
 class App(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
-        # self.overrideredirect(True)
-        self.x = None
-        self.y = None
+        self.overrideredirect(True)
+
         self.is_original = False
 
         self.img_orig = Image.open("assets/girl.jpg")
@@ -26,6 +25,11 @@ class App(tk.Tk):
 
         self.geometry(f'{self.w_resized}x{self.h_resized}')
         self.eval('tk::PlaceWindow . center')
+
+        self.x = self.winfo_x()
+        self.y = self.winfo_y()
+        self.x_resized = self.winfo_x()
+        self.y_resized = self.winfo_y()
 
         self.canvas = tk.Canvas(self, width=self.w_resized, height=self.h_resized, bd=0, highlightthickness=0)
 
@@ -44,6 +48,10 @@ class App(tk.Tk):
         self.btn_start = Button(self, image=self.img_record)
         # self.btn_start.pack(side=TOP, anchor=NW)
 
+        img = Image.open('assets/stop_small.png')
+        self.img_stop = ImageTk.PhotoImage(img)
+        self.btn_stop = Button(self, image=self.img_stop)
+
         self.canvas.place(x=x_center, y=y_center, anchor=CENTER, relwidth=1, relheight=1)
 
         self.bind("<ButtonPress-1>", self.start_move)
@@ -55,15 +63,15 @@ class App(tk.Tk):
         self.bind('<Double-Button-1>', self.on_double_click)
 
         self.after(333, self.blink, self.canvas, self.id_rect)
-        # self.after(100, self.set_appwindow)
+        self.after(100, self.set_appwindow)
 
     def start_move(self, event):
         self.x = event.x
         self.y = event.y
 
     def stop_move(self, event):
-        self.x = None
-        self.y = None
+        self.x = event.x
+        self.y = event.y
 
     def do_move(self, event):
         if self.x is None or self.y is None:
@@ -88,12 +96,15 @@ class App(tk.Tk):
         # width = self.winfo_width()
         # height = self.winfo_height()
         self.btn_start.pack(side=TOP, anchor=NW)
+        # self.btn_stop.pack(side=BOTTOM, anchor=SE)
+        self.btn_stop.pack(side=BOTTOM, anchor=SW)
         self.geometry(f"+{self.winfo_x()}+{self.winfo_y()}")
 
     def on_leave(self, event):
         # self.overrideredirect(True)
         # self.set_appwindow()
         self.btn_start.pack_forget()
+        self.btn_stop.pack_forget()
 
     def on_resize(self, event):
         self.resize_canvas(event.width, event.height)
@@ -104,12 +115,16 @@ class App(tk.Tk):
         if not self.is_original:
             width = self.w_orig
             height = self.h_orig
+            self.x_resized = self.winfo_x()
+            self.y_resized = self.winfo_y()
 
         self.geometry(f'{width}x{height}')
         self.resize_canvas(width, height)
 
         if not self.is_original:
             self.center()
+        else:
+            self.geometry(f'+{self.x_resized}+{self.y_resized}')
 
         self.is_original = not self.is_original
 

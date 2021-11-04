@@ -84,7 +84,7 @@ class MainWindow:
 
         self.menu_bar = Menu(root)
         self.menu_bar.add_command(label="Back", command=self.back_in_history)
-        self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
+        # self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
 
         hist_menu = Menu(self.menu_bar, tearoff=0)
         hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
@@ -147,27 +147,21 @@ class MainWindow:
                                          state=DISABLED)
         self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.btn_shrink = Button(root, text="><", command=self.on_shrink)
-        self.btn_shrink.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.level += 1
-        img = Image.open('assets/rec2.png')
-        w, h = img.size
-        self.img_record = ImageTk.PhotoImage(img)
-        self.btn_start = Button(root, text="Start", image=self.img_record, command=self.on_btn_start)
-        self.btn_start.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-        # self.canvas = Canvas(root, width=w, height=h)
-        # self.canvas.create_image(10, 10, image=self.img_record)
-        # self.canvas.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
-
-        self.btn_stop = Button(root, text="Stop", command=self.on_btn_stop, state=DISABLED)
-        self.btn_stop.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
-
         self.copy_button = Button(root, text="Copy", command=self.copy_model_name)
-        self.copy_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.copy_button.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
         self.paste_button = Button(root, text="Paste", command=self.paste_model_name)
-        self.paste_button.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.paste_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+
+        img = Image.open('assets/rec_small.png')
+        self.img_record = ImageTk.PhotoImage(img)
+        self.btn_start = Button(root, image=self.img_record, command=self.on_btn_start)
+        self.btn_start.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
+
+        img = Image.open('assets/stop_small.png')
+        self.img_stop = ImageTk.PhotoImage(img)
+        self.btn_stop = Button(root, image=self.img_stop, command=self.on_btn_stop, state=DISABLED)
+        self.btn_stop.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
