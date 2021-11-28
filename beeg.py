@@ -52,6 +52,8 @@ WEEK = 7 * DAY
 MONTH = 30 * DAY
 THREE_MONTHS = 3 * MONTH
 
+SEMAPHORE_JOBS = 16
+
 HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
 
 EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 106, 108,
@@ -67,7 +69,9 @@ EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98,
          327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348,
          349, 350, 351, 352]
 
-random.seed()
+random.seed(time.time())
+alive_edges = set()
+last_successful_edge = None
 
 executor = ThreadPoolExecutor(max_workers=20)
 
@@ -337,8 +341,12 @@ class MainWindow:
         self.update_model_info(True)
 
     def get_resolutions(self):
-        rnd = random.choice(EDGES)
-        playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
+        global last_successful_edge
+
+        edge = last_successful_edge
+        if edge is None:
+            edge = random.choice(EDGES)
+        playlist_url = f"https://edge{edge}.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
         try:
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             if r.status_code == 302:
@@ -357,11 +365,14 @@ class MainWindow:
             actual_url = r.url
             slash_pos = actual_url.rfind('/')
             self.base_url = actual_url[: slash_pos + 1]
+            last_successful_edge = edge
             return True
         except RequestException as error:
             print("GetPlayList exception model: " + self.model_name)
             print(error)
             traceback.print_exc()
+            if last_successful_edge == edge:
+                last_successful_edge = None
             return False
 
     def load_image(self):
@@ -449,7 +460,7 @@ class MainWindow:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                root.title(root.title() + " (" + best_bandwidth + ") ")
+                root.title(str(last_successful_edge) + " : " + root.title() + " (" + best_bandwidth + ") ")
 
         if self.session is None:
             return
@@ -457,7 +468,7 @@ class MainWindow:
         if not self.session.is_alive():
             return
 
-        if not root.title().startswith(self.session.model_name):
+        if root.title().find(self.session.model_name) == -1:
             return
 
         root.title(root.title() + " - Recording")
@@ -669,12 +680,12 @@ async def bound_fetch(sem, url, session):
 
 async def fetch_playlists(model_list):
     # create instance of Semaphore
-    sem = asyncio.Semaphore(16)
+    sem = asyncio.Semaphore(SEMAPHORE_JOBS)
     tasks = []
-    rnd_sample = random.sample(EDGES, len(model_list))
+
     time_out = aiohttp.ClientTimeout(sock_connect=2.05, sock_read=3.05)
     async with ClientSession(timeout=time_out) as session:
-        for rnd, model in zip(rnd_sample, model_list):
+        for rnd, model in model_list:
             playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
             task = asyncio.ensure_future(bound_fetch(sem, playlist_url, session))
             tasks.append(task)
@@ -683,6 +694,8 @@ async def fetch_playlists(model_list):
 
 
 def update_models_bps(model_list, tries):
+    global last_successful_edge
+
     if len(model_list) == 0:
         return
 
@@ -696,11 +709,16 @@ def update_models_bps(model_list, tries):
     except RuntimeError as e:
         loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    future = asyncio.ensure_future(fetch_playlists(model_list))
-    results = zip(model_list, loop.run_until_complete(future))
+
+    if len(alive_edges) < SEMAPHORE_JOBS // 4:
+        rnd_sample = random.sample(EDGES, len(model_list))
+    else:
+        rnd_sample = random.choices(list(alive_edges), k=len(model_list))
+    future = asyncio.ensure_future(fetch_playlists(zip(rnd_sample, model_list)))
+    results = zip(model_list, rnd_sample, loop.run_until_complete(future))
 
     failed = []
-    for model, response in results:
+    for model, edge, response in results:
         if len(response) == 0:
             model.is_online = False
             continue
@@ -710,6 +728,10 @@ def update_models_bps(model_list, tries):
             continue
 
         model.is_online = True
+
+        if edge is not None:
+            last_successful_edge = edge
+            alive_edges.add(edge)
 
     update_models_bps(failed, tries + 1)
 

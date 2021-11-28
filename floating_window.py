@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import HIDDEN, NORMAL, Button, LEFT, TOP, NW, NSEW, CENTER, NE, SE, BOTTOM, RIGHT, SW
 from ctypes import windll
+
+import clipboard
 from PIL import Image, ImageTk
 
 INIT_WIDTH = 200
@@ -14,9 +16,15 @@ WS_EX_TOOLWINDOW = 0x00000080
 class App(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
-        self.overrideredirect(True)
 
+        self.model_name = ""
+
+        self.overrideredirect(True)
         self.is_original = False
+
+        self.context_menu = tk.Menu(self, tearoff=0)
+        self.context_menu.add_command(label="Copy", )
+        self.context_menu.add_command(label="Exit", command=self.destroy)
 
         self.img_orig = Image.open("assets/girl.jpg")
         self.w_orig, self.h_orig = self.img_orig.size
@@ -52,6 +60,10 @@ class App(tk.Tk):
         self.img_stop = ImageTk.PhotoImage(img)
         self.btn_stop = Button(self, image=self.img_stop)
 
+        img = Image.open('assets/paste.png')
+        self.img_paste = ImageTk.PhotoImage(img)
+        self.btn_paste = Button(self, image=self.img_paste)
+
         self.canvas.place(x=x_center, y=y_center, anchor=CENTER, relwidth=1, relheight=1)
 
         self.bind("<ButtonPress-1>", self.start_move)
@@ -61,6 +73,7 @@ class App(tk.Tk):
         self.bind('<Enter>', self.on_enter)
         self.bind('<Leave>', self.on_leave)
         self.bind('<Double-Button-1>', self.on_double_click)
+        self.bind("<Button-3>", self.popup)
 
         self.after(333, self.blink, self.canvas, self.id_rect)
         self.after(100, self.set_appwindow)
@@ -98,6 +111,7 @@ class App(tk.Tk):
         self.btn_start.pack(side=TOP, anchor=NW)
         # self.btn_stop.pack(side=BOTTOM, anchor=SE)
         self.btn_stop.pack(side=BOTTOM, anchor=SW)
+        self.btn_paste.pack(side=BOTTOM, anchor=SE)
         self.geometry(f"+{self.winfo_x()}+{self.winfo_y()}")
 
     def on_leave(self, event):
@@ -105,6 +119,7 @@ class App(tk.Tk):
         # self.set_appwindow()
         self.btn_start.pack_forget()
         self.btn_stop.pack_forget()
+        self.btn_paste.pack_forget()
 
     def on_resize(self, event):
         self.resize_canvas(event.width, event.height)
@@ -161,6 +176,15 @@ class App(tk.Tk):
         y = self.winfo_screenheight() // 2 - win_height // 2
         self.geometry(f'+{x}+{y}')
         self.deiconify()
+
+    def popup(self, event):
+        try:
+            self.context_menu.tk_popup(event.x_root, event.y_root, 0)
+        finally:
+            self.context_menu.grab_release()
+
+    def copy_model_name(self):
+        clipboard.copy(self.model_name)
 
 
 def fit_image(img, maxwidth, maxheight):
