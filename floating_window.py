@@ -4,6 +4,7 @@ from ctypes import windll
 
 import clipboard
 from PIL import Image, ImageTk
+from PIL.Image import Resampling
 
 INIT_WIDTH = 200
 INIT_HEIGHT = 120
@@ -199,7 +200,7 @@ def fit_image(img, maxwidth, maxheight):
         height = maxheight
         width = int(width * scalingfactor)
 
-    return img.resize((width, height), Image.ANTIALIAS)
+    return img.resize((width, height), Resampling.LANCZOS)
 
 
 if __name__ == "__main__":

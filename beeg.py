@@ -38,7 +38,7 @@ DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -414,7 +414,6 @@ class MainWindow:
             img_resized = img.resize((450, int(h * k)))
             root.after_idle(self.update_image, img_resized)
         except BaseException as error:
-            # root.after_idle(self.set_undefined_state)
             print("Exception URL: " + self.img_url)
             print(error)
             traceback.print_exc()
