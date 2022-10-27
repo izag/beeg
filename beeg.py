@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import random
+import sys
 import time
 import traceback
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -1028,4 +1029,11 @@ if __name__ == "__main__":
 
     # root.resizable(False, False)
     my_gui = MainWindow()
+    if len(sys.argv) > 4:
+        w = sys.argv[1]
+        h = sys.argv[2]
+        x = sys.argv[3]
+        y = sys.argv[4]
+        root.geometry(f'{w}x{h}+{x}+{y}')
+
     root.mainloop()
