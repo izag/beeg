@@ -242,9 +242,9 @@ $(document).ready(function () {
     $('#defaultAudioCodec').val(defaultAudioCodec || 'undefined');
     $('#currentVersion').html('Hls version:' + Hls.version);
     $('#streamURL').val(sourceURL);
-	$('#videoSize').val('720');
-	$('#video').width('720');
-	$('#bufferedCanvas').width('720');
+	$('#videoSize').val('1080');
+	$('#video').width('1080');
+	$('#bufferedCanvas').width('1080');
     video.volume = 0.05;
     hideAllTabs();
     $('#metricsButtonWindow').toggle(windowSliding);
@@ -1292,7 +1292,7 @@ function createTestStreamWithConfig(target, config) {
 }
 module.exports = {
     bbb: createTestStreamWithConfig({
-        url: 'https://edge175.stream.highwebmedia.com/live-hls/amlst:nnnnnnn-sd-4aaecfd733df2144d56ffde2cfa8c4ee4d3dd7502bf715568dd43628b4a055ca_trns_h264/playlist.m3u8',
+        url: 'https://edge20-waw.live.mmcdn.com/live-hls/amlst:nnnnnnn-sd-4aaecfd733df2144d56ffde2cfa8c4ee4d3dd7502bf715568dd43628b4a055ca_trns_h264/playlist.m3u8',
         description: 'Big Buck Bunny - adaptive qualities'
     }, {
         // try to workaround test failing because of slow seek on Chrome/Win10

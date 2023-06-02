@@ -20,7 +20,7 @@ class App(tk.Tk):
 
         self.model_name = ""
 
-        self.overrideredirect(True)
+        # self.overrideredirect(True)
         self.is_original = False
 
         self.context_menu = tk.Menu(self, tearoff=0)
@@ -77,7 +77,7 @@ class App(tk.Tk):
         self.bind("<Button-3>", self.popup)
 
         self.after(333, self.blink, self.canvas, self.id_rect)
-        self.after(100, self.set_appwindow)
+        # self.after(100, self.set_appwindow)
 
     def start_move(self, event):
         self.x = event.x
@@ -200,7 +200,7 @@ def fit_image(img, maxwidth, maxheight):
         height = maxheight
         width = int(width * scalingfactor)
 
-    return img.resize((width, height), Resampling.LANCZOS)
+    return img.resize((width, height), resample=Resampling.NEAREST, reducing_gap=1.0)
 
 
 if __name__ == "__main__":

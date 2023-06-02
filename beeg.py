@@ -7,6 +7,7 @@ import random
 import sys
 import time
 import traceback
+from collections import deque
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
@@ -39,7 +40,7 @@ DELAY = 2000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -180,6 +181,7 @@ class MainWindow:
         self.img_url = None
         self.scan_idx = -1
         self.repeat = N_REPEAT
+        self.img_counter = 0
 
         self.hist_logger = logging.getLogger('history')
         self.hist_logger.setLevel(logging.INFO)
@@ -398,7 +400,9 @@ class MainWindow:
 
                 self.repeat -= 1
 
-        if (self.img_url is not None) or self.show_image:
+        self.img_counter += 1
+        if (self.img_url is not None) and self.show_image:
+        # if (self.img_url is not None or self.img_counter % 30 == 0) and self.show_image and (self.model_name is not None):
             executor.submit(self.fetch_image)
 
         root.update_idletasks()
@@ -408,11 +412,14 @@ class MainWindow:
         global root
 
         try:
+            # if self.img_counter % 30 == 0:
+            #     self.img_url = HTTP_IMG_URL + self.model_name
+
             response = self.http_session.get(self.img_url, timeout=TIMEOUT)
             img = Image.open(io.BytesIO(response.content))
             w, h = img.size
             k = 450 / w
-            img_resized = img.resize((450, int(h * k)))
+            img_resized = img.resize((450, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
             root.after_idle(self.update_image, img_resized)
         except BaseException as error:
             print("Exception URL: " + self.img_url)
@@ -421,6 +428,7 @@ class MainWindow:
             self.img_url = None
             self.model_image = None
             self.repeat = 0
+            self.img_counter = 0
 
     def update_image(self, img):
         self.model_image = ImageTk.PhotoImage(img)
@@ -923,6 +931,8 @@ class RecordSession(Thread):
         self.name = 'RecordSession'
         self.stopped = False
         self.daemon = True
+        self.file_num = 1
+        self.file_deq = deque(maxlen=4)
 
         self.logger = logging.getLogger('beeg_application')
         self.logger.setLevel(logging.DEBUG)
@@ -951,19 +961,16 @@ class RecordSession(Thread):
             self.logger.exception(error)
             return None
 
-    def save_to_file(self, filename):
-        self.logger.debug(filename)
-        file_path = os.path.join(self.output_dir, filename)
-        if os.path.exists(file_path):
-            self.logger.debug("Skipped: " + filename)
-            return
+    def save_to_file(self, remote_filename, local_filename):
+        self.logger.debug(remote_filename)
+        file_path = os.path.join(self.output_dir, local_filename)
 
-        ts_url = urljoin(self.base_url, filename)
+        ts_url = urljoin(self.base_url, remote_filename)
         try:
             session = POOL.get()
             with session.get(ts_url, stream=True, timeout=TIMEOUT) as r, open(file_path, 'wb') as fd:
                 if r.status_code != 200:
-                    self.logger.debug(f"Status {r.status_code}: {filename}")
+                    self.logger.debug(f"Status {r.status_code}: {remote_filename}")
                     return
                 for chunk in r.iter_content(chunk_size=65536):
                     fd.write(chunk)
@@ -1001,7 +1008,13 @@ class RecordSession(Thread):
 
             try:
                 for ts in chunks.ts:
-                    executor.submit(self.save_to_file, ts)
+                    if ts in self.file_deq:
+                        self.logger.debug("Skipped: " + ts)
+                        continue
+
+                    self.file_deq.append(ts)
+                    executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
+                    self.file_num += 1
             except BaseException as e:
                 self.logger.exception(e)
 
