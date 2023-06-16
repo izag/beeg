@@ -9,6 +9,7 @@ import time
 import traceback
 from collections import deque
 from concurrent.futures.thread import ThreadPoolExecutor
+from queue import Queue
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
     BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
@@ -36,7 +37,8 @@ HEADERS = {
 }
 
 TIMEOUT = (3.05, 9.05)
-DELAY = 2000
+SHORT_IMG_DELAY = 2000
+LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
@@ -77,6 +79,16 @@ last_successful_edge = None
 
 executor = ThreadPoolExecutor(max_workers=20)
 
+
+class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
+    def __init__(self, maxsize=1, *args, **kwargs):
+        super(ThreadPoolExecutorWithQueueSizeLimit, self).__init__(*args, **kwargs)
+        self._work_queue = Queue(maxsize=maxsize)
+
+
+image_loader = ThreadPoolExecutorWithQueueSizeLimit(max_workers=1)
+image_loader_future = None
+
 root = Tk()
 
 
@@ -92,18 +104,18 @@ class MainWindow:
         self.menu_bar.add_command(label="Back", command=self.back_in_history)
         # self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
 
-        hist_menu = Menu(self.menu_bar, tearoff=0)
-        hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
-        hist_menu.add_command(label="Last hour", command=lambda: self.show_full_history(HOUR))
-        hist_menu.add_command(label="Two hours", command=lambda: self.show_full_history(TWO_HOURS))
-        hist_menu.add_command(label="Six hours", command=lambda: self.show_full_history(SIX_HOURS))
-        hist_menu.add_command(label="Half day", command=lambda: self.show_full_history(HALF_DAY))
-        hist_menu.add_command(label="Last day", command=lambda: self.show_full_history(DAY))
-        hist_menu.add_command(label="Two days", command=lambda: self.show_full_history(TWO_DAYS))
-        hist_menu.add_command(label="Week", command=lambda: self.show_full_history(WEEK))
-        hist_menu.add_command(label="Month", command=lambda: self.show_full_history(MONTH))
-        hist_menu.add_command(label="Three months", command=lambda: self.show_full_history(THREE_MONTHS))
-        self.menu_bar.add_cascade(label="History", menu=hist_menu)
+        self.hist_menu = Menu(self.menu_bar, tearoff=0)
+        self.hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
+        self.hist_menu.add_command(label="Last hour", command=lambda: self.show_full_history(HOUR))
+        self.hist_menu.add_command(label="Two hours", command=lambda: self.show_full_history(TWO_HOURS))
+        self.hist_menu.add_command(label="Six hours", command=lambda: self.show_full_history(SIX_HOURS))
+        self.hist_menu.add_command(label="Half day", command=lambda: self.show_full_history(HALF_DAY))
+        self.hist_menu.add_command(label="Last day", command=lambda: self.show_full_history(DAY))
+        self.hist_menu.add_command(label="Two days", command=lambda: self.show_full_history(TWO_DAYS))
+        self.hist_menu.add_command(label="Week", command=lambda: self.show_full_history(WEEK))
+        self.hist_menu.add_command(label="Month", command=lambda: self.show_full_history(MONTH))
+        self.hist_menu.add_command(label="Three months", command=lambda: self.show_full_history(THREE_MONTHS))
+        self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         root.config(menu=self.menu_bar)
 
@@ -121,7 +133,7 @@ class MainWindow:
 
         self.level += 1
         self.cb_model = ttk.Combobox(root, width=60)
-        self.cb_model.bind("<FocusIn>", self.focus_callback)
+        self.cb_model.bind("<FocusIn>", self.focus_in_callback)
         self.cb_model.bind("<Button-1>", self.drop_down_callback)
         self.cb_model.bind('<Return>', self.enter_callback)
         self.cb_model.focus_set()
@@ -172,7 +184,8 @@ class MainWindow:
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
 
-        root.bind("<FocusIn>", self.focus_callback)
+        root.bind("<FocusIn>", self.focus_in_callback)
+        root.bind("<FocusOut>", self.focus_out_callback)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.play_list_url = None
@@ -206,7 +219,9 @@ class MainWindow:
         self.hist_stack = []
 
         self.toggle_image()
-        self.load_image()
+
+        self.load_image_task_id = None
+        self.load_image_delay = LONG_IMG_DELAY
 
     def on_btn_start(self):
         self.btn_start.config(state=DISABLED)
@@ -291,6 +306,7 @@ class MainWindow:
         self.hist_logger.info(self.model_name)
         self.update_title()
         self.set_scan(False)
+        self.start_load_image()
 
         return True
 
@@ -330,10 +346,25 @@ class MainWindow:
         count = self.proxy_dict.get(proxy, 0)
         self.proxy_dict[proxy] = count + 1
 
-    def focus_callback(self, event):
+    def focus_in_callback(self, event):
+        if event.widget != root:
+            return
+
+        self.start_load_image()
         self.cb_model.selection_range(0, END)
         if self.hist_window is not None:
             self.hist_window.lift()
+
+    def focus_out_callback(self, event):
+        self.load_image_delay = LONG_IMG_DELAY
+
+    def start_load_image(self):
+        try:
+            root.after_cancel(self.load_image_task_id)
+        except ValueError:
+            pass
+        self.load_image_delay = SHORT_IMG_DELAY
+        self.load_image_task_id = root.after_idle(self.load_image)
 
     def drop_down_callback(self, event):
         self.cb_model.focus_set()
@@ -379,8 +410,12 @@ class MainWindow:
             return False
 
     def load_image(self):
-        global executor
+        global image_loader
+        global image_loader_future
         global root
+
+        if self.img_url is None or not self.show_image:
+            return
 
         if self.scan_idx >= 0:
             values = list(self.cb_model['values'])
@@ -401,12 +436,12 @@ class MainWindow:
                 self.repeat -= 1
 
         self.img_counter += 1
-        if (self.img_url is not None) and self.show_image:
+        if image_loader_future is None or image_loader_future.done():
         # if (self.img_url is not None or self.img_counter % 30 == 0) and self.show_image and (self.model_name is not None):
-            executor.submit(self.fetch_image)
+            image_loader_future = image_loader.submit(self.fetch_image)
 
         root.update_idletasks()
-        root.after(DELAY, self.load_image)
+        self.load_image_task_id = root.after(self.load_image_delay, self.load_image)
 
     def fetch_image(self):
         global root
@@ -524,7 +559,14 @@ class MainWindow:
         if self.hist_window is not None:
             self.hist_window.on_close()
 
-        self.hist_window = HistoryWindow(self, Toplevel(root), load_hist_dict(period))
+        self.menu_bar.entryconfig("History", state=DISABLED)
+        hist_future = executor.submit(load_hist_dict, period)
+        hist_future.add_done_callback(lambda f: self.show_hist_window(f))
+
+    def show_hist_window(self, future):
+        history = future.result()
+        self.hist_window = HistoryWindow(self, Toplevel(root), history)
+        self.menu_bar.entryconfig("History", state=NORMAL)
 
     def back_in_history(self):
         if len(self.hist_stack) == 0:
@@ -783,7 +825,8 @@ class HistoryWindow:
         frm_top.pack()
         frm_bottom.pack()
 
-        self.window.bind("<FocusIn>", self.focus_callback)
+        self.window.bind("<FocusIn>", self.focus_in_callback)
+        self.window.bind("<FocusOut>", self.focus_out_callback)
         self.window.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.test_online_start = 0
@@ -835,9 +878,15 @@ class HistoryWindow:
         self.window.update_idletasks()
         self.window.destroy()
 
-    def focus_callback(self, event):
+    def focus_in_callback(self, event):
+        if event.widget != self:
+            return
         self.entry_search.selection_range(0, END)
         root.lift()
+
+    def focus_out_callback(self, event):
+        # self.parent_window.show_image = False
+        pass
 
     def test_online(self, model_list):
         global root
