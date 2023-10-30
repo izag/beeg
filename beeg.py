@@ -42,7 +42,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -116,6 +116,8 @@ class MainWindow:
         self.hist_menu.add_command(label="Month", command=lambda: self.show_full_history(MONTH))
         self.hist_menu.add_command(label="Three months", command=lambda: self.show_full_history(THREE_MONTHS))
         self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
+
+        self.menu_bar.add_command(label="Link", command=self.copy_model_link)
 
         root.config(menu=self.menu_bar)
 
@@ -262,6 +264,9 @@ class MainWindow:
 
     def paste_model_name(self):
         self.load_model(clipboard.paste(), True)
+
+    def copy_model_link(self):
+        clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
 
     def update_model_info(self, remember):
         if remember and (self.model_name is not None):
