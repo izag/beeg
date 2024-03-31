@@ -12,13 +12,14 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from queue import Queue
 from threading import Thread
 from tkinter import Tk, Button, ttk, W, E, Label, DISABLED, NORMAL, Menu, END, HORIZONTAL, \
-    BooleanVar, Checkbutton, Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
-    StringVar, Canvas
+    Toplevel, Listbox, Scrollbar, LEFT, Y, SINGLE, BOTH, RIGHT, VERTICAL, Frame, Entry, \
+    StringVar, BOTTOM, X, Canvas
 from urllib.parse import urljoin
 
 import aiohttp
 import clipboard
 import requests
+import vlc
 from PIL import Image, ImageTk
 from aiohttp import ClientSession, ClientConnectorError, ServerTimeoutError
 from requests import RequestException
@@ -118,6 +119,7 @@ class MainWindow:
         self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         self.menu_bar.add_command(label="Link", command=self.copy_model_link)
+        # self.menu_bar.add_command(label="View", command=self.show_player_window)
 
         root.config(menu=self.menu_bar)
 
@@ -201,7 +203,7 @@ class MainWindow:
         self.hist_logger = logging.getLogger('history')
         self.hist_logger.setLevel(logging.INFO)
 
-        self.fh_hist = logging.FileHandler(os.path.join(LOGS, f'hist_{int(time.time())}.log'))
+        self.fh_hist = logging.FileHandler(os.path.join(LOGS, f'hist_{int(time.time() * 1000000)}.log'))
         self.fh_hist.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s\t%(message)s')
         self.fh_hist.setFormatter(formatter)
@@ -211,7 +213,7 @@ class MainWindow:
             self.proxy_logger = logging.getLogger('proxy')
             self.proxy_logger.setLevel(logging.INFO)
 
-            self.fh_proxy = logging.FileHandler(os.path.join(LOGS, f'proxy_{int(time.time())}.log'))
+            self.fh_proxy = logging.FileHandler(os.path.join(LOGS, f'proxy_{int(time.time() * 1000000)}.log'))
             self.fh_proxy.setLevel(logging.INFO)
             self.proxy_logger.addHandler(self.fh_proxy)
 
@@ -225,6 +227,9 @@ class MainWindow:
         self.load_image_task_id = None
         self.load_image_delay = LONG_IMG_DELAY
 
+        # self.vlc_instance = vlc.Instance()
+        # self.media_player = self.vlc_instance.media_player_new()
+
     def on_btn_start(self):
         self.btn_start.config(state=DISABLED)
 
@@ -235,13 +240,13 @@ class MainWindow:
             self.set_default_state()
             return
 
-        self.session = RecordSession(self, self.base_url, self.model_name, self.resolution)
+        self.session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger)
         self.session.start()
 
         self.btn_stop.config(state=NORMAL)
         self.btn_show_recording.config(state=NORMAL)
         self.progress.grid(row=self.level, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
-        self.progress.start()
+        self.progress.start(interval=1000)
 
         self.update_title()
         self.add_to_favorites()
@@ -308,7 +313,6 @@ class MainWindow:
                 return False
 
         self.img_url = HTTP_IMG_URL + self.model_name
-        self.hist_logger.info(self.model_name)
         self.update_title()
         self.set_scan(False)
         self.start_load_image()
@@ -442,7 +446,7 @@ class MainWindow:
 
         self.img_counter += 1
         if image_loader_future is None or image_loader_future.done():
-        # if (self.img_url is not None or self.img_counter % 30 == 0) and self.show_image and (self.model_name is not None):
+            # if (self.img_url is not None or self.img_counter % 30 == 0) and self.show_image and (self.model_name is not None):
             image_loader_future = image_loader.submit(self.fetch_image)
 
         root.update_idletasks()
@@ -572,6 +576,9 @@ class MainWindow:
         history = future.result()
         self.hist_window = HistoryWindow(self, Toplevel(root), history)
         self.menu_bar.entryconfig("History", state=NORMAL)
+
+    def show_player_window(self):
+        player_window = PlayerWindow(self, Toplevel(root))
 
     def back_in_history(self):
         if len(self.hist_stack) == 0:
@@ -821,11 +828,15 @@ class HistoryWindow:
         self.btn_clear.grid(row=2, column=4, sticky=W + E)
 
         self.list_box = Listbox(frm_bottom, width=60, height=40, selectmode=SINGLE)
-        self.list_box.pack(side=LEFT, fill=BOTH, expand=1)
-        scroll = Scrollbar(frm_bottom, command=self.list_box.yview, orient=VERTICAL)
-        scroll.pack(side=RIGHT, fill=Y)
-        self.list_box.config(yscrollcommand=scroll.set)
         self.list_box.bind('<<ListboxSelect>>', self.on_listbox_select)
+        v_scroll = Scrollbar(frm_bottom, command=self.list_box.yview, orient=VERTICAL)
+        h_scroll = Scrollbar(frm_bottom, command=self.list_box.xview, orient=HORIZONTAL)
+
+        self.list_box.config(xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set)
+
+        v_scroll.pack(side=RIGHT, fill=Y)
+        h_scroll.pack(side=BOTTOM, fill=X)
+        self.list_box.pack(side=LEFT, fill=BOTH, expand=True)
 
         frm_top.pack()
         frm_bottom.pack()
@@ -931,7 +942,7 @@ class HistoryWindow:
 
         if state == DISABLED:
             self.progress.grid(row=1, column=2, columnspan=2, sticky=W + E)
-            self.progress.start()
+            self.progress.start(interval=1000)
         else:
             self.progress.grid_forget()
             self.progress.stop()
@@ -946,7 +957,6 @@ class Chunks:
 
 
 class SessionPool:
-
     def __init__(self, count):
         self.size = count
         self.data = []
@@ -969,7 +979,7 @@ POOL = SessionPool(5)
 class RecordSession(Thread):
     MIN_CHUNKS = 6
 
-    def __init__(self, main_win, url_base, model, chunk_url):
+    def __init__(self, main_win, url_base, model, chunk_url, rating_logger):
         super(RecordSession, self).__init__()
 
         self.http_session = requests.Session()
@@ -978,7 +988,7 @@ class RecordSession(Thread):
         self.main_win = main_win
         self.base_url = url_base
         self.model_name = model
-        self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time())))
+        self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time() * 1000000)))
         os.mkdir(self.output_dir)
 
         self.chunks_url = urljoin(self.base_url, chunk_url)
@@ -996,6 +1006,7 @@ class RecordSession(Thread):
         self.fh.setLevel(logging.DEBUG)
         self.fh.setFormatter(formatter)
         self.logger.addHandler(self.fh)
+        self.hist_logger = rating_logger
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
@@ -1069,6 +1080,9 @@ class RecordSession(Thread):
                     self.file_deq.append(ts)
                     executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
                     self.file_num += 1
+
+                    if (self.file_num - 2) % 30 == 0:
+                        self.hist_logger.info(self.model_name)
             except BaseException as e:
                 self.logger.exception(e)
 
@@ -1086,6 +1100,28 @@ class RecordSession(Thread):
 
     def stop(self):
         self.stopped = True
+
+
+class PlayerWindow:
+    def __init__(self, parent, win):
+        self.window = win
+        self.parent_window = parent
+        self.window.title("Media Player")
+        self.window.geometry("800x600")
+
+        self.media_canvas = Canvas(win, bg="black", width=800, height=400)
+        parent.media_player.set_hwnd(self.media_canvas.winfo_id())
+        self.media_canvas.pack(pady=10, fill=BOTH, expand=True)
+        if parent.base_url is not None:
+            media = parent.vlc_instance.media_new(urljoin(parent.base_url, 'playlist.m3u8'))
+            parent.media_player.set_media(media)
+            parent.media_player.play()
+
+    def on_close(self):
+        self.parent_window.hist_window = None
+        self.media_player.stop()
+        self.window.update_idletasks()
+        self.window.destroy()
 
 
 if __name__ == "__main__":
