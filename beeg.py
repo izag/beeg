@@ -4,6 +4,8 @@ import io
 import logging
 import os
 import random
+import re
+import socket
 import sys
 import time
 import traceback
@@ -18,15 +20,17 @@ from urllib.parse import urljoin
 
 import aiohttp
 import clipboard
+import cloudscraper
 import requests
 import vlc
 from PIL import Image, ImageTk
 from aiohttp import ClientSession, ClientConnectorError, ServerTimeoutError
 from requests import RequestException
+from urllib3 import Retry
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:93.0) Gecko/20100101 Firefox/93.0'
 
-REFERER = 'https://cbjpeg.stream.highwebmedia.com'
+REFERER = 'https://jpeg.live.mmcdn.com'
 
 proxies = None
 
@@ -59,20 +63,10 @@ THREE_MONTHS = 3 * MONTH
 
 SEMAPHORE_JOBS = 16
 
-HTTP_IMG_URL = "https://cbjpeg.stream.highwebmedia.com/stream?room="
+HTTP_IMG_URL = "https://jpeg.live.mmcdn.com/stream?room="
 
-EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 106, 108,
-         109, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126, 133, 134, 135, 136, 137, 138, 139,
-         140, 141, 142, 143, 144, 145, 146, 147, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 164,
-         165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186,
-         187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208,
-         209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230,
-         231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 248, 249, 250, 251, 252, 253,
-         254, 256, 257, 259, 260, 261, 264, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 278, 279, 280, 281, 282,
-         283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304,
-         305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326,
-         327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348,
-         349, 350, 351, 352]
+PLAYER_HOST = 'localhost'
+PLAYER_PORT = 8686
 
 random.seed(time.time())
 alive_edges = set()
@@ -100,6 +94,7 @@ class MainWindow:
 
         self.http_session = requests.Session()
         self.http_session.headers.update(HEADERS)
+        self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
 
         self.menu_bar = Menu(root)
         self.menu_bar.add_command(label="Back", command=self.back_in_history)
@@ -119,6 +114,7 @@ class MainWindow:
         self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         self.menu_bar.add_command(label="Link", command=self.copy_model_link)
+        self.menu_bar.add_command(label="Path", command=self.copy_recording_path)
         # self.menu_bar.add_command(label="View", command=self.show_player_window)
 
         root.config(menu=self.menu_bar)
@@ -230,6 +226,8 @@ class MainWindow:
         # self.vlc_instance = vlc.Instance()
         # self.media_player = self.vlc_instance.media_player_new()
 
+        self.edge = None
+
     def on_btn_start(self):
         self.btn_start.config(state=DISABLED)
 
@@ -272,6 +270,14 @@ class MainWindow:
 
     def copy_model_link(self):
         clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
+
+    def copy_recording_path(self):
+        if self.session is None:
+            return
+
+        clipboard.copy(self.session.output_dir)
+        executor.submit(send_to_player, self.session.output_dir)
+        # send_to_player(self.session.output_dir)
 
     def update_model_info(self, remember):
         if remember and (self.model_name is not None):
@@ -383,14 +389,60 @@ class MainWindow:
     def enter_callback(self, event):
         self.update_model_info(True)
 
+    def get_hls_source(self):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+            'Referer': 'https://chaturbat.net.ru',
+            'Host': 'chaturbat.net.ru',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+            'Accept-Encoding': 'gzip, deflate, br, zstd',
+            'X-Requested-With': 'XMLHttpRequest',
+            'DNT': '1',
+            'Sec-GPC': '1',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'TE': 'trailers',
+        }
+
+        try:
+            self.http_session.headers.update(headers)
+            self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(self.http_session)
+            r = scraper.get(f"https://chaturbat.net.ru/{self.model_name}", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                return None
+            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.model_name}/none.json", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                return None
+            result = r.json()
+
+            if result['room_status'] != 'public':
+                return None
+
+            return result['hls_source']
+        except BaseException as error:
+            print(error)
+            traceback.print_exc()
+
     def get_resolutions(self):
         global last_successful_edge
 
-        edge = last_successful_edge
-        if edge is None:
-            edge = random.choice(EDGES)
-        playlist_url = f"https://edge{edge}.stream.highwebmedia.com/live-hls/amlst:{self.model_name}/playlist.m3u8"
+        if self.edge is None:
+            playlist_url = self.get_hls_source()
+            if playlist_url is None or len(playlist_url) < 1:
+                return False
+
+            found = re.search(r"https://(.*?)/", playlist_url, re.DOTALL)
+            if (found is not None) and (found.group(0) is not None):
+                self.edge = found.group(1)
+        else:
+            playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
+
         try:
+            self.http_session.headers.update(HEADERS)
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             if r.status_code == 302:
                 redirect_url = r.headers['Location']
@@ -408,14 +460,11 @@ class MainWindow:
             actual_url = r.url
             slash_pos = actual_url.rfind('/')
             self.base_url = actual_url[: slash_pos + 1]
-            last_successful_edge = edge
             return True
         except RequestException as error:
             print("GetPlayList exception model: " + self.model_name)
             print(error)
             traceback.print_exc()
-            if last_successful_edge == edge:
-                last_successful_edge = None
             return False
 
     def load_image(self):
@@ -512,7 +561,7 @@ class MainWindow:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                root.title(str(last_successful_edge) + " : " + root.title() + " (" + best_bandwidth + ") ")
+                root.title(self.edge + " : " + root.title() + " (" + best_bandwidth + ") ")
 
         if self.session is None:
             return
@@ -748,11 +797,17 @@ async def fetch_playlists(model_list):
     time_out = aiohttp.ClientTimeout(sock_connect=2.05, sock_read=3.05)
     async with ClientSession(timeout=time_out) as session:
         for rnd, model in model_list:
-            playlist_url = f"https://edge{rnd}.stream.highwebmedia.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
+            playlist_url = f"https://edge{rnd}-hel.live.mmcdn.com/live-hls/amlst:{model.model_name}/playlist.m3u8"
             task = asyncio.ensure_future(bound_fetch(sem, playlist_url, session))
             tasks.append(task)
 
         return await asyncio.gather(*tasks)
+
+
+def send_to_player(path):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect((PLAYER_HOST, PLAYER_PORT))
+        sock.sendall(bytes(path + "\n", 'ascii'))
 
 
 def update_models_bps(model_list, tries):

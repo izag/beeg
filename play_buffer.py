@@ -50,6 +50,7 @@ In particular, we have two main parts:
 import argparse
 import ctypes
 import os
+import sys
 import time
 
 import vlc
@@ -60,7 +61,31 @@ class StreamProviderDir(object):
         self._media_files = []
         self._rootpath = rootpath
         self._file_ext = file_ext
+        self._start_file_count = 0
         self._index = 0
+        self._data = None
+        self._pos = 0
+
+    def update_file_list(self):
+        # print("read file list")
+        NFILES = 10
+        files = []
+        for entry in os.listdir(self._rootpath):
+            if os.path.splitext(entry)[1] == f".{self._file_ext}":
+                files.append(os.path.join(self._rootpath, entry))
+        files.sort()
+
+        if self._start_file_count == 0:
+            if len(files) <= NFILES:
+                self._media_files = files
+            else:
+                self._start_file_count = len(files) - NFILES
+
+        self._media_files = files[self._start_file_count:]
+
+        # print("playlist:")
+        # for index, media_file in enumerate(self._media_files):
+        #     print(f"[{index}] {media_file}")
 
     def open(self):
         """
@@ -71,15 +96,7 @@ class StreamProviderDir(object):
         remote url or whatever you prefer.
         """
 
-        print("read file list")
-        for entry in os.listdir(self._rootpath):
-            if os.path.splitext(entry)[1] == f".{self._file_ext}":
-                self._media_files.append(os.path.join(self._rootpath, entry))
-        self._media_files.sort()
-
-        print("playlist:")
-        for index, media_file in enumerate(self._media_files):
-            print(f"[{index}] {media_file}")
+        self.update_file_list()
 
     def release_resources(self):
         """
@@ -88,6 +105,7 @@ class StreamProviderDir(object):
         e.g. closing the socket from where we retrieved media data
         """
         print("releasing stream provider")
+        self._data = None
 
     def seek(self, offset):
         """
@@ -95,22 +113,45 @@ class StreamProviderDir(object):
         """
         print(f"requested seek with offset={offset}")
 
-    def get_data(self):
+    def get_data(self, length):
         """
         It reads the current file in the list and returns the binary data
         In this example it reads from file, but it could have downloaded data from an url
         """
-        print(f"reading file [{self._index}] ", end='')
+
+        try_count = 10
+        while self._index == len(self._media_files) and try_count > 0:
+            self.update_file_list()
+            print("the end of file list is reached")
+            try_count -= 1
+            time.sleep(0.5)
 
         if self._index == len(self._media_files):
             print("file list is over")
             return b''
+        
+        data = b''
+        if self._data is None:
+            print(f"reading file [{self._index}] {self._media_files[self._index]}")
+            self.update_file_list()
+            with open(self._media_files[self._index], 'rb') as stream:
+                self._data = stream.read()
+                self._pos = 0
 
-        print(f"{self._media_files[self._index]}")
-        with open(self._media_files[self._index], 'rb') as stream:
-            data = stream.read()
+        if self._pos < len(self._data):
+            # print(f"pos={self._pos} len={len(self._data)}")
+            remains = len(self._data) - self._pos;
+            # print(f"remains={remains} length={length}")
+            len_to_read = min(length, remains)
+            # print(f"len_to_read={len_to_read} interval=[{self._pos}, {self._pos + len_to_read}]")
+            data = self._data[self._pos:self._pos + len_to_read]
+            self._pos = self._pos + len_to_read
+            # print(f"new_pos={self._pos}")
 
-        self._index = self._index + 1
+        if self._pos >= len(self._data):
+            self._index = self._index + 1
+            # print(f"go to index={self._index}")
+            self._data = None
 
         return data
 
@@ -127,26 +168,35 @@ def media_open_cb(opaque, data_pointer, size_pointer):
     stream_provider.open()
 
     data_pointer.contents.value = opaque
-    size_pointer.value = 1 ** 64 - 1
+    size_pointer.value = sys.maxsize
+
+    print("OPEN", opaque, data_pointer, size_pointer)
 
     return 0
 
 
 @vlc.CallbackDecorators.MediaReadCb
 def media_read_cb(opaque, buffer, length):
-    print("READ", opaque, buffer, length)
+    # print("READ", opaque, buffer, length)
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
 
-    new_data = stream_provider.get_data()
-    bytes_read = len(new_data)
+    data = stream_provider.get_data(length)
+    bytes_read = len(data)
+
+    new_data = data
+    if bytes_read > length:
+        new_data = data[:length]
+        bytes_read = length
 
     if bytes_read > 0:
-        buffer_array = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char * bytes_read))
-        for index, b in enumerate(new_data):
-            buffer_array.contents[index] = ctypes.c_char(b)
+    #     buffer_array = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char * bytes_read))
+    #     for index, b in enumerate(new_data):
+    #         buffer_array.contents[index] = ctypes.c_char(b)
+        for index, char in enumerate(new_data):
+            buffer[index] = char
 
-    print(f"just read {bytes_read} bytes")
+    # print(f"just read {bytes_read} bytes")
     return bytes_read
 
 
@@ -177,6 +227,7 @@ if __name__ == '__main__':
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
             'media_folder',
+            default='C:\\Users\\Gregory\\tmp2\\_vi_vi__1720527357757975',
             help='where to find files to play')
     parser.add_argument(
             '--extension',
@@ -187,6 +238,7 @@ if __name__ == '__main__':
     # helper object acting as media data provider
     # it is just to highlight how the opaque pointer in the callback can be used
     # and that the logic can be isolated from the callbacks
+
     stream_provider = StreamProviderDir(args.media_folder, args.extension)
 
     # these two lines to highlight how to pass a python object using ctypes
@@ -203,12 +255,13 @@ if __name__ == '__main__':
             media_read_cb,
             media_seek_cb,
             media_close_cb,
-            stream_provider_ptr)
+            stream_provider_ptr
+    )
     player = media.player_new_from_media()
 
     # play/stop
     player.play()
 
-    time.sleep(60)
+    time.sleep(600)
 
-    # player.stop()
+    player.stop()

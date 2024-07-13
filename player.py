@@ -53,8 +53,9 @@ def main():
     # media_list.add_media(media)
 
     # folder = "C:\\Users\\Gregory\\tmp2\\lolliis_1701902034689184"
-    folder = "C:\\Users\\Gregory\\tmp2\\vixenp_1701908303862079"
-    for file in os.listdir(folder):
+    folder = "C:\\Users\\Gregory\\tmp2\\alyona_24_1719405807533890"
+    files = os.listdir(folder)
+    for file in files[:2]:
         media = player.media_new(os.path.join(folder, file))
         media_list.add_media(media)
 
@@ -100,6 +101,11 @@ def main():
     #
     # time.sleep(15)
     # media_player.set_rate(1)
+
+    for file in files[3:]:
+        media = player.media_new(os.path.join(folder, file))
+        media_list.add_media(media)
+        time.sleep(0.5)
 
     time.sleep(60)
 

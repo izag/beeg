@@ -1,12 +1,21 @@
 import asyncio
+import json
 import random
 import time
 import traceback
-from tkinter import CENTER, N, Tk, Canvas, HIDDEN, NORMAL
+from tkinter import CENTER, N, Tk, Canvas, HIDDEN, NORMAL, Listbox
 from tkinter.ttk import Label
 
+import cloudscraper as cloudscraper
+import requests
 from PIL import ImageTk, Image
 from aiohttp import ClientSession
+from requests_tor import RequestsTor, TOR_HEADERS
+from urllib3 import Retry
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
+
 
 EDGES = [81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99,
          100, 101, 102, 103, 104, 106, 108, 110, 111, 112, 113, 115, 116, 117, 118, 119, 120, 123, 124, 125, 126,
@@ -117,7 +126,7 @@ def test_online(model_list):
 
 
 def demo(master):
-    listbox = tk.Listbox(master)
+    listbox = Listbox(master)
     listbox.pack(expand=1, fill="both")
 
     # inserting some items
@@ -216,9 +225,248 @@ def quit_app():
     root.destroy()
 
 
+def test_request_chaturbat_net_ru():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Referer': 'https://chaturbat.net.ru',
+        'Host': 'chaturbat.net.ru',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br, zstd',
+        'X-Requested-With': 'XMLHttpRequest',
+        'DNT': '1',
+        'Sec-GPC': '1',
+        'Connection': 'keep-alive',
+        # 'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'TE': 'trailers',
+        # 'Priority': 'u=1',
+    }
+
+    try:
+        with requests.Session() as http_session:
+            http_session.headers.update(headers)
+            http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(http_session)
+            # r = scraper.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+            # r = http_session.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+
+            r = scraper.get("https://chaturbat.net.ru/sigmasian", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                with open("404.txt", "wb") as fout:
+                    fout.write(r.content)
+                return
+            r = scraper.get("https://chaturbat.net.ru/chat-model/sigmasian/none.json", timeout=(3.05, 9.05))
+            # r = scraper.get("https://sex-videochat.club/chaturbate/chat/breeding_material/", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                with open("404.txt", "wb") as fout:
+                    fout.write(r.content)
+                return
+            r.json()
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
+
+
+def test_request_all_chaturbat_net_ru():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Referer': 'https://chaturbat.net.ru',
+        # 'Host': 'chaturbat.net.ru',
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'X-Requested-With': 'XMLHttpRequest',
+        # 'DNT': '1',
+        # 'Sec-GPC': '1',
+        'Connection': 'keep-alive',
+        # 'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        # 'TE': 'trailers',
+        # 'Priority': 'u=1',
+    }
+
+    try:
+        with requests.Session() as http_session:
+            http_session.headers.update(headers)
+            http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(http_session)
+            # r = scraper.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+            # r = http_session.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+
+            r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                with open("404.txt", "wb") as fout:
+                    fout.write(r.content)
+                return
+            # r = http_session.get("https://chaturbat.net.ru/chat-model/adalyn_glow/none.json",
+            #                      timeout=(3.05, 9.05))
+            # r = scraper.get("https://sex-videochat.club/chaturbate/chat/breeding_material/", timeout=(3.05, 9.05))
+            # if r.status_code != 200:
+            #     with open("404.txt", "wb") as fout:
+            #         fout.write(r.content)
+            #     return
+            r.json()
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
+
+
+def test_request_chaturbate_ajax():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Referer': 'https://chaturbate.com',
+        'Host': 'chaturbate.com',
+        'origin': 'https://chaturbate.com',
+        'Accept': '*/*',
+        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referrer Policy': 'strict-origin-when-cross-origin',
+        'cookie': 'csrftoken=PRvAZPwTXIBpnssDsmtfNzV7TwpSqtKt1Dj008KWQGxxei9gYl6U0k9Vo4ENrrp5; affkey=eJyrVipSslJQUtJRUEoBMYwMjEx0Dcx0DU2VagFVGwXN; sbr=sec:sbr95d263fd-4ef7-441e-8a00-0539509b680a:1sIhUi:AY04A4oDiUnoQ5dx6Gdc_9UQjam7sUzS8TcAiQ4342E; _sp_ses.825f=*; cf_clearance=btM3BscNRJ5UmA0kIwdDj5eSwRraUQRwiZ_p_ErEhsc-1718512112-1.0.1.1-Pzk6zkmIjaOYCTq56iHM2W352MZDznCZDwgR01YzId0y27c04lf6kkWL4OL08UNggE4M28NHlC.HFoz83SRIvA; __utfpp=f:trnxa5725b05405f095e735ed03661947dfa:1sIhVZ:kFAd60t_mNjAGqDYeesFIDKrNLhujoSTLzp99BQht_U; agreeterms=1; _sp_id.825f=6461f02b-9646-4e20-9063-1da59b7a816b.1718512103.1.1718512327..54f0e30a-afd8-481b-8ad1-da21c57aba39..a651bcde-7ac4-440a-bfce-aa877fca3031.1718512103070.10; __cf_bm=y.CR_mgvrSGZp3WNvld4ZbeQj4FbBlq7z6WhNTlfspA-1718512981-1.0.1.1-b.7ciLJhP3E_GdrRPNRVd5P.zX0JxN1TrZcg9M8w22fB50Whs8eqn3sfE6Cofl.ra4NzQ5J6xxwwITpAFJb6hg; ag={"teen-cams":16,"18to21-cams":17,"20to30-cams":1}',
+        'x-newrelic-id': 'VQIGWV9aDxACUFNVDgMEUw==',
+        'sec-ch-ua': '"Chromium";v="106", "Google Chrome";v="106", "Not;A=Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'content-length': '625',
+        'content-type': 'multipart/form-data;'
+        # 'TE': 'trailers',
+        # 'Priority': 'u=1',
+    }
+
+    data = {
+        'room_slug': 'peek_in_my_window',
+        'bandwidth': 'high',
+        'csrfmiddlewaretoken': 'PRvAZPwTXIBpnssDsmtfNzV7TwpSqtKt1Dj008KWQGxxei9gYl6U0k9Vo4ENrrp5'
+    }
+
+    try:
+        with requests.Session() as http_session:
+            http_session.headers.update(headers)
+            http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(http_session)
+            # r = scraper.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+            # r = http_session.get("https://sex-videochat.club/feed/get-models/bonga/all/", timeout=(3.05, 9.05))
+
+            r = scraper.post("https://chaturbate.com/get_edge_hls_url_ajax/", data=data, timeout=(10.05, 9.05))
+            if r.status_code != 200:
+                with open("404.txt", "wb") as fout:
+                    fout.write(r.content)
+                return
+            # r = http_session.get("https://chaturbat.net.ru/chat-model/adalyn_glow/none.json", timeout=(3.05, 9.05))
+            # r = scraper.get("https://sex-videochat.club/chaturbate/chat/breeding_material/", timeout=(3.05, 9.05))
+            # if r.status_code != 200:
+            #     with open("404.txt", "wb") as fout:
+            #         fout.write(r.content)
+            #     return
+            r.json()
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
+
+
+def test_tor():
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Referer': 'https://chaturbate.com',
+        'Host': 'chaturbate.com',
+        'origin': 'https://chaturbate.com',
+        'Accept': '*/*',
+        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+    }
+
+    headers1 = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
+        'Referer': 'https://chaturbate.com',
+        'Accept': '*/*',
+        'Connection': 'keep-alive',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Sec-Fetch-Dest': 'empty',
+        'Sec-Fetch-Mode': 'cors',
+        'Sec-Fetch-Site': 'same-origin',
+        'TE': 'trailers',
+        'DNT': '1',
+        'Sec-GPC': '1',
+    }
+
+    data = {
+        'room_slug': 'peek_in_my_window',
+        'bandwidth': 'high',
+    }
+
+    proxies = {
+        "http": f"socks5h://localhost:9150",
+        "https": f"socks5h://localhost:9150",
+    }
+
+    browser = {
+        'browser': 'chrome',
+        'platform': 'windows',
+        'desktop': True,
+        'mobile': False,
+    }
+
+    try:
+        with requests.Session() as http_session:
+            http_session.headers.update(headers1)
+            http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(sess=http_session, interpreter="nodejs", delay=100, browser=browser)
+            # rt = RequestsTor()
+            r = scraper.get('https://chaturbate.com/api/more_like/ohvivian/', proxies=proxies, timeout=(3.05, 9.05))
+            # r = rt.get('https://chaturbate.com/', timeout=(3.05, 9.05))
+            i = 0
+            while r.status_code != 200 or i < 10:
+                with open("404.txt", "wb") as fout:
+                    fout.write(r.content)
+                r = scraper.get('https://chaturbate.com/api/more_like/ohvivian/', proxies=proxies, timeout=(3.05, 9.05))
+                i += 1
+
+            if r.status_code != 200:
+                return
+
+            print(r.text)
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
+
+
+def test_selenium_firefox():
+    firefox_profile = webdriver.FirefoxProfile('C:\\Users\\Gregory\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\zlk8ndod.default-release\\')
+    firefox_profile.set_preference('browser.privatebrowsing.autostart', True)
+    options = Options()
+    options.profile = firefox_profile
+
+    driver = webdriver.Firefox(options=options)
+    driver.get('view-source:https://chaturbate.com/api/more_like/ohvivian/')
+
+    content = driver.page_source
+    content = driver.find_element(By.TAG_NAME, 'pre').text
+    parsed_json = json.loads(content)
+    print(parsed_json)
+
+    # driver.quit()
+
+
 if __name__ == "__main__":
     # root = tk.Tk()
     # demo(root)
     # root.mainloop()
     # test_online(TEST_DATA)
-    test_transparancy()
+    # test_transparancy()
+    # test_request_chaturbat_net_ru()
+    # test_request_all_chaturbat_net_ru()
+    # test_request_chaturbate_ajax()
+    # test_tor()
+    test_selenium_firefox()
