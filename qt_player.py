@@ -418,4 +418,6 @@ if __name__ == '__main__':
         window.setWindowTitle('VLC Player')
         window.setGeometry(600, 100, 200, 80)
         window.show()
-        sys.exit(app.exec_())
+        exit_code = app.exec_()
+        server.shutdown()
+        sys.exit(exit_code)
