@@ -72,7 +72,7 @@ random.seed(time.time())
 alive_edges = set()
 last_successful_edge = None
 
-executor = ThreadPoolExecutor(max_workers=20)
+executor = ThreadPoolExecutor(max_workers=100)
 
 
 class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
@@ -114,18 +114,17 @@ class MainWindow:
         self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         self.menu_bar.add_command(label="Link", command=self.copy_model_link)
-        self.menu_bar.add_command(label="Path", command=self.copy_recording_path)
+        self.menu_bar.add_command(label="Play", command=self.copy_recording_path)
         # self.menu_bar.add_command(label="View", command=self.show_player_window)
 
         root.config(menu=self.menu_bar)
 
-        self.session = None
+        self.record_sessions = {}
         self.show_image = False
         self.hist_window = None
 
         self.model_name = None
         self.resolution = None
-        self.update_title()
 
         self.level = 0
 
@@ -178,7 +177,7 @@ class MainWindow:
 
         img = Image.open('assets/stop_small.png')
         self.img_stop = ImageTk.PhotoImage(img)
-        self.btn_stop = Button(root, image=self.img_stop, command=self.on_btn_stop, state=DISABLED)
+        self.btn_stop = Button(root, image=self.img_stop, command=self.on_btn_stop)
         self.btn_stop.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
@@ -218,6 +217,7 @@ class MainWindow:
 
         self.hist_stack = []
 
+        self.update_title()
         self.toggle_image()
 
         self.load_image_task_id = None
@@ -229,38 +229,48 @@ class MainWindow:
         self.edge = None
 
     def on_btn_start(self):
-        self.btn_start.config(state=DISABLED)
+        # self.btn_start.config(state=DISABLED)
 
-        self.stop()
+        session = self.record_sessions.get(self.model_name, None)
+        if session is not None and session.is_alive():
+            return
+        
+        # self.stop()
 
         success = self.update_model_info(True)
         if not success:
-            self.set_default_state()
+            # self.set_default_state()
             return
 
-        self.session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger)
-        self.session.start()
+        session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger)
+        self.record_sessions[self.model_name] = session
+        session.start()
 
-        self.btn_stop.config(state=NORMAL)
-        self.btn_show_recording.config(state=NORMAL)
-        self.progress.grid(row=self.level, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
-        self.progress.start(interval=1000)
+        # self.btn_stop.config(state=NORMAL)
+        # self.btn_show_recording.config(state=NORMAL)
+        # self.progress.grid(row=self.level, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
+        # self.progress.start(interval=1000)
 
         self.update_title()
         self.add_to_favorites()
 
-        root.configure(background='green')
+        # root.configure(background='green')
+        # self.btn_start.config(state=NORMAL)
 
     def on_btn_stop(self):
+        # self.btn_stop.config(state=DISABLED)
         self.stop()
-        self.set_default_state()
+        self.update_title()
+        # self.set_default_state()
+        # self.btn_stop.config(state=NORMAL)
 
     def stop(self):
-        if self.session is None:
+        session = self.record_sessions.get(self.model_name, None)
+        if session is None:
             return
 
-        self.session.stop()
-        self.session = None
+        session.stop()
+        del self.record_sessions[self.model_name]
 
     def copy_model_name(self):
         clipboard.copy(self.cb_model.get())
@@ -272,12 +282,12 @@ class MainWindow:
         clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
 
     def copy_recording_path(self):
-        if self.session is None:
+        session = self.record_sessions.get(self.model_name, None)
+        if session is None or not session.is_alive():
             return
 
-        clipboard.copy(self.session.output_dir)
-        executor.submit(send_to_player, self.session.output_dir)
-        # send_to_player(self.session.output_dir)
+        clipboard.copy(session.output_dir)
+        executor.submit(send_to_player, session.output_dir)
 
     def update_model_info(self, remember):
         if remember and (self.model_name is not None):
@@ -530,9 +540,16 @@ class MainWindow:
     def on_close(self):
         global root
 
-        self.stop()
+        for model, session in self.record_sessions.items():
+            if session is None:
+                continue
+
+            session.stop()
+
         root.update_idletasks()
         root.destroy()
+        executor.shutdown(False, cancel_futures=True)
+        image_loader.shutdown(False, cancel_futures=True)
         self.fh_hist.close()
         self.hist_logger.removeHandler(self.fh_hist)
         if REMEMBER_PROXIES:
@@ -543,7 +560,7 @@ class MainWindow:
     def set_default_state(self):
         global root
 
-        self.session = None
+        # self.session = None
         self.btn_stop.config(state=DISABLED)
         self.btn_start.config(state=NORMAL)
         self.btn_show_recording.config(state=DISABLED)
@@ -555,24 +572,32 @@ class MainWindow:
     def update_title(self):
         global root
 
-        root.title(self.model_name or '<Undefined>')
+        self.btn_update.configure(background='SystemButtonFace')
+
+        if self.model_name is None:
+            root.title('<Undefined>')
+            return
+        
+        root.title(self.model_name)
 
         if self.resolution is not None:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                root.title(self.edge + " : " + root.title() + " (" + best_bandwidth + ") ")
+                root.title(f'({len(self.record_sessions)}) {self.edge} : {root.title()} ({best_bandwidth}) ')
 
-        if self.session is None:
+        session = self.record_sessions.get(self.model_name, None)
+        if session is None:
             return
 
-        if not self.session.is_alive():
+        if not session.is_alive():
             return
 
-        if root.title().find(self.session.model_name) == -1:
+        if root.title().find(session.model_name) == -1:
             return
 
         root.title(root.title() + " - Recording")
+        self.btn_update.configure(background='green')
 
     def set_undefined_state(self):
         self.model_image = None
@@ -619,7 +644,7 @@ class MainWindow:
 
         self.menu_bar.entryconfig("History", state=DISABLED)
         hist_future = executor.submit(load_hist_dict, period)
-        hist_future.add_done_callback(lambda f: self.show_hist_window(f))
+        hist_future.add_done_callback(lambda f: root.after_idle(self.show_hist_window, f))
 
     def show_hist_window(self, future):
         history = future.result()
@@ -721,6 +746,7 @@ def load_hist_dict(period):
         with open(full_path) as f:
             for line in f.readlines():
                 parts = line.strip().split('\t')
+
                 if len(parts) == 1:
                     name = parts[0]
                 else:
@@ -729,6 +755,10 @@ def load_hist_dict(period):
                     diff = now - stamp
                     if (period != ALL_TIME) and (diff > period):
                         continue
+
+                # broken line
+                if '\x00' == name[0]:
+                    continue
 
                 count = res.get(name, 0)
                 res[name] = count + 1
@@ -1143,10 +1173,10 @@ class RecordSession(Thread):
 
             time.sleep(0.5)
 
-        try:
-            root.after_idle(self.main_win.set_default_state)
-        except RuntimeError as e:
-            self.logger.exception(e)
+        # try:
+        #     root.after_idle(self.main_win.set_default_state)
+        # except RuntimeError as e:
+        #     self.logger.exception(e)
 
         self.logger.info("Exited!")
         self.fh.close()

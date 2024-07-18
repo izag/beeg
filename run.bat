@@ -8,3 +8,6 @@ for /l %%i in (0, 1, 4) do (
 		timeout 1
 	)
 )
+
+
+wmic process where "CommandLine LIKE '%%beeg.py%%'" CALL setpriority "idle"
