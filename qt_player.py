@@ -7,8 +7,6 @@ import time
 from PyQt5 import QtCore, QtWidgets, QtNetwork, QtGui
 
 
-# vlc = vlc.Instance()
-# media_player = vlc.media_player_new()
 HOST = 'localhost'
 PORT = 8686
 SERVER_ADDRESS = (HOST, PORT)
@@ -67,7 +65,7 @@ class StreamProviderDir(object):
         e.g. closing the socket from where we retrieved media data
         """
         print("releasing stream provider")
-        self._data = None
+        # self._data = None
 
     def seek(self, offset):
         """
@@ -80,16 +78,10 @@ class StreamProviderDir(object):
         It reads the current file in the list and returns the binary data
         In this example it reads from file, but it could have downloaded data from an url
         """
-        # global player
-        # slow = 1
-        # player.set_rate(slow)
 
         try_count = 10
         while self._index == len(self._media_files) and try_count > 0:
             print("the end of file list is reached")
-            # if try_count % 2 == 0:
-            #     slow = slow / 2
-            # player.set_rate(slow)
             self.update_file_list()
             try_count -= 1
             time.sleep(0.5)
@@ -136,16 +128,20 @@ def wait_download(file_path):
     current_size = get_size(file_path)
     time.sleep(0.5)
     new_size = get_size(file_path)
-    while current_size != new_size or new_size == 0:
+    try_count = 10
+    while try_count > 0 and (current_size != new_size or new_size == 0):
         print(f'waiting for file to be downloded {file_path}')
         current_size = new_size
         time.sleep(0.5)
+        try_count -= 1
         new_size = get_size(file_path)
 
 
 @vlc.CallbackDecorators.MediaOpenCb
 def media_open_cb(opaque, data_pointer, size_pointer):
     print("OPEN", opaque, data_pointer, size_pointer)
+    if opaque is None:
+        return 1
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.open()
@@ -161,6 +157,8 @@ def media_open_cb(opaque, data_pointer, size_pointer):
 @vlc.CallbackDecorators.MediaReadCb
 def media_read_cb(opaque, buffer, length):
     # print("READ", opaque, buffer, length)
+    if opaque is None:
+        return 0
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
 
@@ -173,9 +171,6 @@ def media_read_cb(opaque, buffer, length):
         bytes_read = length
 
     if bytes_read > 0:
-    #     buffer_array = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_char * bytes_read))
-    #     for index, b in enumerate(new_data):
-    #         buffer_array.contents[index] = ctypes.c_char(b)
         for index, char in enumerate(new_data):
             buffer[index] = char
 
@@ -186,6 +181,8 @@ def media_read_cb(opaque, buffer, length):
 @vlc.CallbackDecorators.MediaSeekCb
 def media_seek_cb(opaque, offset):
     print("SEEK", opaque, offset)
+    if opaque is None:
+        return 0
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.seek(offset)
@@ -196,6 +193,8 @@ def media_seek_cb(opaque, offset):
 @vlc.CallbackDecorators.MediaCloseCb
 def media_close_cb(opaque):
     print("CLOSE", opaque)
+    if opaque is None:
+        return
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.release_resources()
@@ -206,10 +205,14 @@ class VLCPlayer(QtCore.QObject):
         super().__init__()
         self._vlc = vlc.Instance()
         self._player = self._vlc.media_player_new()
+        self._player.event_manager().event_attach(
+            vlc.EventType.MediaPlayerEndReached, self._handle_finished
+        )
         self._provider = StreamProviderDir('.', 'ts')
     
     def play(self):
         self._player.play()
+        print(self._player.get_hwnd())
 
     def stop(self):
         self._player.stop()
@@ -219,8 +222,6 @@ class VLCPlayer(QtCore.QObject):
 
     def load(self, path):
         self._provider = StreamProviderDir(path.strip(), 'ts')
-        # stream_provider_obj = ctypes.py_object(self._provider)
-        # stream_provider_ptr = ctypes.byref(stream_provider_obj)
         stream_provider_ptr = ctypes.cast(ctypes.pointer(ctypes.py_object(self._provider)), ctypes.c_void_p)
         self._player.set_media(
             self._vlc.media_new_callbacks(
@@ -235,11 +236,26 @@ class VLCPlayer(QtCore.QObject):
     def set_hwnd(self, wnd):
         self._player.set_hwnd(wnd)
 
+    def get_hwnd(self):
+        self._player.get_hwnd()
 
-player = VLCPlayer()
+    def _handle_finished(self, event):
+        if event.type == vlc.EventType.MediaPlayerEndReached:
+            self.player.stop()
+
+    def toggle_fullscreen(self):
+        self._player.toggle_fullscreen()
+
+
+class StopSignalEmitter(QtCore.QObject):
+    stop_signal = QtCore.pyqtSignal(str, name='stop')
+
+
+emitter = StopSignalEmitter()
+
 
 class Window(QtWidgets.QMainWindow):
-    def __init__(self, player):
+    def __init__(self):
         super().__init__()
 
         self.widget = QtWidgets.QWidget(self)
@@ -251,26 +267,38 @@ class Window(QtWidgets.QMainWindow):
         self.buttonStop.clicked.connect(self.handleStop)
         # self.buttonRate = QtWidgets.QPushButton('Rate')
         # self.buttonRate.clicked.connect(self.handleRate)
+        emitter.stop_signal.connect(self.handlePlayAnother)
+
         self.hbuttonbox = QtWidgets.QHBoxLayout()
         self.hbuttonbox.addWidget(self.buttonPlay)
         self.hbuttonbox.addWidget(self.buttonStop)
         # layout.addWidget(self.buttonRate)
 
+        self.buttonsFrame = QtWidgets.QFrame()
+        self.buttonsFrame.setLayout(self.hbuttonbox)
+        self.buttonsFrame.setMinimumSize(QtCore.QSize(200, 40))
+        self.buttonsFrame.setSizePolicy(
+            QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Fixed)
+
         self.videoframe = QtWidgets.QFrame()
-        self.palette = self.videoframe.palette()
-        self.palette.setColor(QtGui.QPalette.Window, QtGui.QColor(0, 0, 0))
-        self.videoframe.setPalette(self.palette)
-        self.videoframe.setAutoFillBackground(True)
+        # self.palette = self.videoframe.palette()
+        # self.palette.setColor(QtGui.QPalette.Window, QtGui.QColor(0, 0, 0))
+        # self.videoframe.setPalette(self.palette)
+        # self.videoframe.setAutoFillBackground(True)
 
         self.vboxlayout = QtWidgets.QVBoxLayout()
-        self.vboxlayout.addLayout(self.hbuttonbox)
+        self.vboxlayout.setContentsMargins(0, 0, 0, 0)
+        self.vboxlayout.addWidget(self.buttonsFrame)
         self.vboxlayout.addWidget(self.videoframe)
         self.widget.setLayout(self.vboxlayout)
 
-        self.player = player
-        self.rate = 1
+        self.player = VLCPlayer()
         self.player.set_hwnd(self.videoframe.winId())
-        
+
+        self.shortcutFull = QtWidgets.QShortcut(self)
+        self.shortcutFull.setKey(QtGui.QKeySequence('F'))
+        self.shortcutFull.setContext(QtCore.Qt.ApplicationShortcut)
+        self.shortcutFull.activated.connect(self.handleFullScreen)
 
     def handlePlay(self):
         path = clipboard.paste()
@@ -278,11 +306,25 @@ class Window(QtWidgets.QMainWindow):
             return
         
         self.player.load(path)
-        self.player.set_rate(1)
         self.player.play()
 
     def handleStop(self):
         self.player.stop()
+
+    def handlePlayAnother(self, path):
+        self.player.stop()
+
+        self.setWindowTitle(path)
+
+        # this will remove minimized status 
+        # and restore window with keeping maximized/normal state
+        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+
+        # this will activate the window
+        self.activateWindow()
+
+        self.player.load(path)
+        self.player.play()
 
     def handleRate(self):
         # Server().startServer()
@@ -294,6 +336,17 @@ class Window(QtWidgets.QMainWindow):
         path, ok = QtWidgets.QFileDialog.getOpenFileName(self, filter='All Files (*.*)')
         if ok:
             self.player.load(path)
+
+    def handleFullScreen(self):
+        if self.isFullScreen():
+            self.buttonsFrame.show()
+            # self.showNormal()
+            self.setWindowState(self.windowState() & ~QtCore.Qt.WindowFullScreen)
+        else:
+            self.buttonsFrame.hide()
+            # self.showFullScreen()
+            self.setWindowState(self.windowState() | QtCore.Qt.WindowFullScreen)
+            
 
 
 class Messenger(object):
@@ -356,9 +409,10 @@ class ThreadedTCPRequestHandler(socketserver.StreamRequestHandler):
     def handle(self):
         path = str(self.rfile.readline(), 'ascii').strip()
         print('received: ' + path)
-        player.stop()
-        player.load(path)
-        player.play()
+        # player.stop()
+        # player.load(path)
+        # player.play()
+        emitter.stop_signal.emit(path)
 
 
 class Client(QtCore.QObject):
@@ -414,7 +468,7 @@ if __name__ == '__main__':
         server_thread.start()
 
         app = QtWidgets.QApplication(sys.argv)  
-        window = Window(player)
+        window = Window()
         window.setWindowTitle('VLC Player')
         window.setGeometry(600, 100, 200, 80)
         window.show()

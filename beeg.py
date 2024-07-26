@@ -296,6 +296,8 @@ class MainWindow:
 
         self.set_undefined_state()
 
+        self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
+
         input_url = self.cb_model.get().strip()
 
         if len(input_url) == 0:
@@ -548,8 +550,8 @@ class MainWindow:
 
         root.update_idletasks()
         root.destroy()
-        executor.shutdown(False, cancel_futures=True)
-        image_loader.shutdown(False, cancel_futures=True)
+        # executor.shutdown(False, cancel_futures=True)
+        # image_loader.shutdown(False, cancel_futures=True)
         self.fh_hist.close()
         self.hist_logger.removeHandler(self.fh_hist)
         if REMEMBER_PROXIES:
@@ -575,10 +577,10 @@ class MainWindow:
         self.btn_update.configure(background='SystemButtonFace')
 
         if self.model_name is None:
-            root.title('<Undefined>')
+            root.title(f'({len(self.record_sessions)}) <Undefined>')
             return
         
-        root.title(self.model_name)
+        root.title(f'({len(self.record_sessions)}) {self.model_name}')
 
         if self.resolution is not None:
             chunks = self.resolution.split('_')
@@ -1173,10 +1175,10 @@ class RecordSession(Thread):
 
             time.sleep(0.5)
 
-        # try:
-        #     root.after_idle(self.main_win.set_default_state)
-        # except RuntimeError as e:
-        #     self.logger.exception(e)
+        try:
+            root.after(2000, self.main_win.update_title)
+        except RuntimeError as e:
+            self.logger.exception(e)
 
         self.logger.info("Exited!")
         self.fh.close()
