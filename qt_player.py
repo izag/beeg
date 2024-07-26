@@ -157,8 +157,6 @@ def media_open_cb(opaque, data_pointer, size_pointer):
 @vlc.CallbackDecorators.MediaReadCb
 def media_read_cb(opaque, buffer, length):
     # print("READ", opaque, buffer, length)
-    if opaque is None:
-        return 0
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
 
@@ -208,6 +206,8 @@ class VLCPlayer(QtCore.QObject):
         self._player.event_manager().event_attach(
             vlc.EventType.MediaPlayerEndReached, self._handle_finished
         )
+        self._player.video_set_key_input(0)
+        self._player.video_set_mouse_input(0)
         self._provider = StreamProviderDir('.', 'ts')
     
     def play(self):
@@ -254,6 +254,19 @@ class StopSignalEmitter(QtCore.QObject):
 emitter = StopSignalEmitter()
 
 
+class VideoFrame(QtWidgets.QFrame):
+    def __init__(self, mainWin):
+        super().__init__()
+        self.frm = mainWin
+    
+    def mousePressEvent(self, QMouseEvent):
+        if QMouseEvent.button() == QtCore.Qt.RightButton:
+            self.frm.setWindowState(self.frm.windowState() & ~QtCore.Qt.WindowFullScreen)
+            self.frm.buttonsFrame.show()
+            self.frm.handleStop()
+            self.frm.setWindowState(self.frm.windowState() | QtCore.Qt.WindowMinimized)
+
+
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -280,7 +293,7 @@ class Window(QtWidgets.QMainWindow):
         self.buttonsFrame.setSizePolicy(
             QtWidgets.QSizePolicy.MinimumExpanding, QtWidgets.QSizePolicy.Fixed)
 
-        self.videoframe = QtWidgets.QFrame()
+        self.videoframe = VideoFrame(self)
         # self.palette = self.videoframe.palette()
         # self.palette.setColor(QtGui.QPalette.Window, QtGui.QColor(0, 0, 0))
         # self.videoframe.setPalette(self.palette)
@@ -316,6 +329,7 @@ class Window(QtWidgets.QMainWindow):
 
         self.setWindowTitle(path)
 
+        self.buttonsFrame.hide()
         # this will remove minimized status 
         # and restore window with keeping maximized/normal state
         self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
@@ -325,6 +339,7 @@ class Window(QtWidgets.QMainWindow):
 
         self.player.load(path)
         self.player.play()
+        self.setWindowState(self.windowState() | QtCore.Qt.WindowFullScreen)
 
     def handleRate(self):
         # Server().startServer()
@@ -339,15 +354,17 @@ class Window(QtWidgets.QMainWindow):
 
     def handleFullScreen(self):
         if self.isFullScreen():
-            self.buttonsFrame.show()
-            # self.showNormal()
             self.setWindowState(self.windowState() & ~QtCore.Qt.WindowFullScreen)
+            self.buttonsFrame.show()
         else:
             self.buttonsFrame.hide()
-            # self.showFullScreen()
             self.setWindowState(self.windowState() | QtCore.Qt.WindowFullScreen)
             
-
+    # def mousePressEvent(self, QMouseEvent):
+    #     if QMouseEvent.button() == QtCore.Qt.RightButton:
+    #         self.setWindowState(self.windowState() & ~QtCore.Qt.WindowFullScreen)
+    #         self.buttonsFrame.show()
+    #         self.handleStop()
 
 class Messenger(object):
     def __init__(self):
