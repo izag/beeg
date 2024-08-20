@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -72,7 +72,7 @@ random.seed(time.time())
 alive_edges = set()
 last_successful_edge = None
 
-executor = ThreadPoolExecutor(max_workers=100)
+executor = ThreadPoolExecutor(max_workers=5)
 
 
 class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
@@ -226,7 +226,9 @@ class MainWindow:
         # self.vlc_instance = vlc.Instance()
         # self.media_player = self.vlc_instance.media_player_new()
 
+        # edge for browsing 
         self.edge = None
+        self.edges = {}
 
     def on_btn_start(self):
         session = self.record_sessions.get(self.model_name, None)
@@ -238,7 +240,7 @@ class MainWindow:
             return False
         
         if self.base_url is None or self.resolution is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry)
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
             get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f))
             return
 
@@ -326,6 +328,9 @@ class MainWindow:
             chunk_pos = input_url.rfind('chunklist')
             if chunk_pos >= 0:
                 self.resolution = input_url[chunk_pos:]
+            found = re.search(r"https://(.*?)/", input_url, re.DOTALL)
+            if (found is not None) and (found.group(0) is not None):
+                self.edge = found.group(1)
         elif input_url.startswith('http'):
             slash_pos = input_url[: -1].rfind('/')
             self.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
@@ -340,7 +345,7 @@ class MainWindow:
             return
 
         if self.base_url is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry)
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, False)
             get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_get_resolutions, f))
             return
 
@@ -371,6 +376,8 @@ class MainWindow:
         self.btn_paste.config(state=new_state)
         self.btn_start.config(state=new_state)
         self.btn_stop.config(state=new_state)
+        if self.hist_window is not None:
+            self.hist_window.list_box.config(state=new_state)
 
 
     def add_to_favorites(self):
@@ -414,7 +421,7 @@ class MainWindow:
             return
 
         self.start_load_image()
-        self.cb_model.selection_range(0, END)
+        # self.cb_model.selection_range(0, END)
         if self.hist_window is not None:
             self.hist_window.lift()
 
@@ -431,7 +438,7 @@ class MainWindow:
 
     def drop_down_callback(self, event):
         self.cb_model.focus_set()
-        self.cb_model.selection_range(0, END)
+        # self.cb_model.selection_range(0, END)
         self.cb_model.event_generate('<Down>')
 
     def enter_callback(self, event):
@@ -459,9 +466,9 @@ class MainWindow:
             self.http_session.headers.update(headers)
             self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.http_session)
-            r = scraper.get(f"https://chaturbat.net.ru/{self.model_name}", timeout=(3.05, 9.05))
-            if r.status_code != 200:
-                return None
+            # r = scraper.get(f"https://chaturbat.net.ru/{self.model_name}", timeout=(3.05, 9.05))
+            # if r.status_code != 200:
+            #     return None
             r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.model_name}/none.json", timeout=(3.05, 9.05))
             if r.status_code != 200:
                 return None
@@ -475,17 +482,24 @@ class MainWindow:
             print(error)
             traceback.print_exc()
 
-    def get_resolutions(self):
+    def get_resolutions(self, for_record):
         global last_successful_edge
 
-        if self.edge is None:
-            playlist_url = self.get_hls_source()
-            if playlist_url is None or len(playlist_url) < 1:
-                return False
+        if self.edge is None or for_record:
+            model_edge = self.edges.get(self.model_name, None)
+            if model_edge is None:
+                playlist_url = self.get_hls_source()
+                if playlist_url is None or len(playlist_url) < 1:
+                    return False
 
-            found = re.search(r"https://(.*?)/", playlist_url, re.DOTALL)
-            if (found is not None) and (found.group(0) is not None):
-                self.edge = found.group(1)
+                found = re.search(r"https://(.*?)/", playlist_url, re.DOTALL)
+                if (found is not None) and (found.group(0) is not None):
+                    self.edge = found.group(1)
+                    if for_record:
+                        self.edges[self.model_name] = found.group(1)
+            else:
+                playlist_url = f"https://{model_edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
+                self.edge = model_edge
         else:
             playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
 
@@ -515,10 +529,10 @@ class MainWindow:
             traceback.print_exc()
             return False
         
-    def get_resolutions_retry(self):
-        success = self.get_resolutions()
+    def get_resolutions_retry(self, for_record):
+        success = self.get_resolutions(for_record)
         if not success:
-            success = self.get_resolutions()
+            success = self.get_resolutions(for_record)
 
         return success
 
@@ -629,7 +643,8 @@ class MainWindow:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                root.title(f'({len(self.record_sessions)}) {self.edge} : {root.title()} ({best_bandwidth}) ')
+                edge_addr = self.edges.get(self.model_name, self.edge)
+                root.title(f'({len(self.record_sessions)}) {edge_addr} : {self.model_name} ({best_bandwidth}) ')
 
         session = self.record_sessions.get(self.model_name, None)
         if session is None:
@@ -638,11 +653,15 @@ class MainWindow:
         if not session.is_alive():
             return
 
-        if root.title().find(session.model_name) == -1:
-            return
+        # if root.title().find(session.model_name) == -1:
+        #     return
 
         root.title(root.title() + " - Recording")
         self.btn_update.configure(background='green')
+
+    def update_active_records(self, model_name):
+        self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
+        self.update_title()
 
     def set_undefined_state(self):
         self.model_image = None
@@ -677,6 +696,10 @@ class MainWindow:
             self.image_label.place_forget()
             self.show_image = False
             self.set_scan(False)
+            try:
+                root.after_cancel(self.load_image_task_id)
+            except ValueError:
+                pass
         else:
             self.show_image = True
             # self.image_label.grid(row=0, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
@@ -763,7 +786,7 @@ class MainWindow:
 
     def load_model(self, model, remember):
         self.cb_model.set(model)
-        self.cb_model.selection_range(0, END)
+        # self.cb_model.selection_range(0, END)
         self.update_model_info_async(remember)
 
     def on_shrink(self):
@@ -1025,9 +1048,9 @@ class HistoryWindow:
         self.window.destroy()
 
     def focus_in_callback(self, event):
-        if event.widget != self:
+        if event.widget != self.window:
             return
-        self.entry_search.selection_range(0, END)
+        # self.entry_search.selection_range(0, END)
         root.lift()
 
     def focus_out_callback(self, event):
@@ -1103,7 +1126,7 @@ class SessionPool:
         return s
 
 
-POOL = SessionPool(5)
+POOL = SessionPool(1)
 
 
 class RecordSession(Thread):
@@ -1128,15 +1151,17 @@ class RecordSession(Thread):
         self.file_num = 1
         self.file_deq = deque(maxlen=4)
 
-        self.logger = logging.getLogger('beeg_application')
-        self.logger.setLevel(logging.DEBUG)
+        self.logger = logging.getLogger(f'record_{self.model_name}')
+        self.logger.setLevel(logging.INFO)
         formatter = logging.Formatter('[%(asctime)s] %(threadName)s:%(funcName)s > %(message)s')
 
-        self.fh = logging.FileHandler(os.path.join(self.output_dir, self.model_name + '.log'))
-        self.fh.setLevel(logging.DEBUG)
-        self.fh.setFormatter(formatter)
-        self.logger.addHandler(self.fh)
+        fh = logging.FileHandler(os.path.join(self.output_dir, self.model_name + '.log'))
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(formatter)
+        self.logger.addHandler(fh)
         self.hist_logger = rating_logger
+
+        self.record_executor = ThreadPoolExecutor(max_workers=5)
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
@@ -1173,10 +1198,9 @@ class RecordSession(Thread):
             self.logger.exception(error)
 
     def run(self):
-        global executor
         global root
 
-        self.logger.info("Started!")
+        self.logger.info(f"Started {self.model_name}!")
         fails = 0
         last_pos = 0
 
@@ -1195,7 +1219,7 @@ class RecordSession(Thread):
                 fails = 0
 
             if last_pos >= chunks.cur_pos:
-                time.sleep(0.5)
+                time.sleep(1)
                 continue
 
             last_pos = chunks.cur_pos
@@ -1208,7 +1232,7 @@ class RecordSession(Thread):
                         continue
 
                     self.file_deq.append(ts)
-                    executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
+                    self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
                     self.file_num += 1
 
                     if (self.file_num - 2) % 30 == 0:
@@ -1216,16 +1240,17 @@ class RecordSession(Thread):
             except BaseException as e:
                 self.logger.exception(e)
 
-            time.sleep(0.5)
+            time.sleep(1)
 
-        self.logger.info("Exited!")
-        self.fh.close()
-        self.logger.removeHandler(self.fh)
+        self.logger.info(f"Exited {self.model_name}!")
+        self.record_executor.shutdown(wait=False, cancel_futures=True)
+        handlers = self.logger.handlers[:]
+        for handler in handlers:
+            self.logger.removeHandler(handler)
+            handler.close()
         self.http_session.close()
-        try:
-            root.after(5000, self.main_win.update_title)
-        except RuntimeError as e:
-            self.logger.exception(e)
+        if not self.stopped:
+            root.after(1000, self.main_win.update_active_records, self.model_name)
 
     def stop(self):
         self.stopped = True
