@@ -184,6 +184,12 @@ class MainWindow:
 
     def go_back(self):
         if len(self.hist_stack) == 0:
+            self.show_page_in_thread()
+            return
+        
+        model = self.hist_stack.pop()
+        if model == root.title():
+            self.go_back()
             return
         
         self.show_page_more_like_in_thread(self.hist_stack.pop(), False)

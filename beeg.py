@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -98,7 +98,7 @@ class MainWindow:
 
         self.menu_bar = Menu(root)
         self.menu_bar.add_command(label="Back", command=self.back_in_history)
-        # self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
+        self.menu_bar.add_command(label="Toggle image", command=self.toggle_image)
 
         self.hist_menu = Menu(self.menu_bar, tearoff=0)
         self.hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
@@ -145,7 +145,7 @@ class MainWindow:
         self.btn_remove.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
-        self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info(True))
+        self.btn_update = Button(root, text="Update info", command=lambda: self.update_model_info_async(True))
         self.btn_update.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_prev = Button(root, text="<< Prev", command=lambda: self.next_favorite(False))
@@ -164,11 +164,11 @@ class MainWindow:
                                          state=DISABLED)
         self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.copy_button = Button(root, text="Copy", command=self.copy_model_name)
-        self.copy_button.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_copy = Button(root, text="Copy", command=self.copy_model_name)
+        self.btn_copy.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.paste_button = Button(root, text="Paste", command=self.paste_model_name)
-        self.paste_button.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_paste = Button(root, text="Paste", command=self.paste_model_name)
+        self.btn_paste.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
 
         img = Image.open('assets/rec_small.png')
         self.img_record = ImageTk.PhotoImage(img)
@@ -229,33 +229,39 @@ class MainWindow:
         self.edge = None
 
     def on_btn_start(self):
-        # self.btn_start.config(state=DISABLED)
-
         session = self.record_sessions.get(self.model_name, None)
         if session is not None and session.is_alive():
             return
         
-        # self.stop()
-
-        success = self.update_model_info(True)
+        success = self.update_base_url(True)
         if not success:
-            # self.set_default_state()
+            return False
+        
+        if self.base_url is None or self.resolution is None:
+            get_resolutions_future = executor.submit(self.get_resolutions_retry)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f))
             return
 
+        self.start_recording()
+
+    def after_successful_start(self, future):
+        success = future.result()
+        if not success:
+            self.set_undefined_state()
+            self.disable_for_update(NORMAL)
+            return
+
+        self.start_recording()
+
+    def start_recording(self):
         session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger)
         self.record_sessions[self.model_name] = session
         session.start()
 
-        # self.btn_stop.config(state=NORMAL)
-        # self.btn_show_recording.config(state=NORMAL)
-        # self.progress.grid(row=self.level, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
-        # self.progress.start(interval=1000)
-
         self.update_title()
         self.add_to_favorites()
-
-        # root.configure(background='green')
-        # self.btn_start.config(state=NORMAL)
+        self.process_online_model()
+        self.disable_for_update(NORMAL)
 
     def on_btn_stop(self):
         # self.btn_stop.config(state=DISABLED)
@@ -288,13 +294,14 @@ class MainWindow:
 
         clipboard.copy(session.output_dir)
         executor.submit(send_to_player, session.output_dir)
-
-    def update_model_info(self, remember):
+    
+    def update_base_url(self, remember):
         if remember and (self.model_name is not None):
             if len(self.hist_stack) == 0 or (self.model_name != self.hist_stack[-1]):
                 self.hist_stack.append(self.model_name)
 
         self.set_undefined_state()
+        self.disable_for_update(DISABLED)
 
         self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
 
@@ -302,6 +309,7 @@ class MainWindow:
 
         if len(input_url) == 0:
             self.set_undefined_state()
+            self.disable_for_update(NORMAL)
             return False
 
         self.base_url = None
@@ -315,27 +323,55 @@ class MainWindow:
                 sd_pos = self.base_url.find('-ws-', colon_pos)
 
             self.model_name = self.base_url[colon_pos + 1: sd_pos]
+            chunk_pos = input_url.rfind('chunklist')
+            if chunk_pos >= 0:
+                self.resolution = input_url[chunk_pos:]
         elif input_url.startswith('http'):
             slash_pos = input_url[: -1].rfind('/')
             self.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
         else:
             self.model_name = input_url
 
+        return True
+
+    def update_model_info_async(self, remember):
+        success = self.update_base_url(remember)
+        if not success:
+            return
+
         if self.base_url is None:
-            success = self.get_resolutions()
-            if not success:
-                success = self.get_resolutions()
+            get_resolutions_future = executor.submit(self.get_resolutions_retry)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_get_resolutions, f))
+            return
 
-            if not success:
-                self.set_undefined_state()
-                return False
+        self.process_online_model()
+        self.disable_for_update(NORMAL)
 
+    def after_get_resolutions(self, future):
+        success = future.result()
+        self.disable_for_update(NORMAL)
+        if not success:
+            self.set_undefined_state()
+            return
+        
+        self.process_online_model()
+
+    def process_online_model(self):
         self.img_url = HTTP_IMG_URL + self.model_name
         self.update_title()
         self.set_scan(False)
         self.start_load_image()
 
-        return True
+    def disable_for_update(self, new_state):
+        self.btn_update.config(state=new_state)
+        self.btn_prev.config(state=new_state)
+        self.btn_next.config(state=new_state)
+        self.btn_scan.config(state=new_state)
+        self.btn_copy.config(state=new_state)
+        self.btn_paste.config(state=new_state)
+        self.btn_start.config(state=new_state)
+        self.btn_stop.config(state=new_state)
+
 
     def add_to_favorites(self):
         input_url = self.cb_model.get().strip()
@@ -399,7 +435,7 @@ class MainWindow:
         self.cb_model.event_generate('<Down>')
 
     def enter_callback(self, event):
-        self.update_model_info(True)
+        self.update_model_info_async(True)
 
     def get_hls_source(self):
         headers = {
@@ -478,6 +514,13 @@ class MainWindow:
             print(error)
             traceback.print_exc()
             return False
+        
+    def get_resolutions_retry(self):
+        success = self.get_resolutions()
+        if not success:
+            success = self.get_resolutions()
+
+        return success
 
     def load_image(self):
         global image_loader
@@ -638,7 +681,7 @@ class MainWindow:
             self.show_image = True
             # self.image_label.grid(row=0, column=0, columnspan=5, sticky=W + E, padx=PAD, pady=PAD)
             self.image_label.place(x=0, y=0, relwidth=1, relheight=1)
-            self.update_model_info(True)
+            self.update_model_info_async(True)
 
     def show_full_history(self, period):
         if self.hist_window is not None:
@@ -721,7 +764,7 @@ class MainWindow:
     def load_model(self, model, remember):
         self.cb_model.set(model)
         self.cb_model.selection_range(0, END)
-        self.update_model_info(remember)
+        self.update_model_info_async(remember)
 
     def on_shrink(self):
         pass
@@ -1175,15 +1218,14 @@ class RecordSession(Thread):
 
             time.sleep(0.5)
 
-        try:
-            root.after(2000, self.main_win.update_title)
-        except RuntimeError as e:
-            self.logger.exception(e)
-
         self.logger.info("Exited!")
         self.fh.close()
         self.logger.removeHandler(self.fh)
         self.http_session.close()
+        try:
+            root.after(5000, self.main_win.update_title)
+        except RuntimeError as e:
+            self.logger.exception(e)
 
     def stop(self):
         self.stopped = True

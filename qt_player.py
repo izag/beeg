@@ -140,8 +140,6 @@ def wait_download(file_path):
 @vlc.CallbackDecorators.MediaOpenCb
 def media_open_cb(opaque, data_pointer, size_pointer):
     print("OPEN", opaque, data_pointer, size_pointer)
-    if opaque is None:
-        return 1
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.open()
@@ -179,8 +177,6 @@ def media_read_cb(opaque, buffer, length):
 @vlc.CallbackDecorators.MediaSeekCb
 def media_seek_cb(opaque, offset):
     print("SEEK", opaque, offset)
-    if opaque is None:
-        return 0
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.seek(offset)
@@ -191,8 +187,6 @@ def media_seek_cb(opaque, offset):
 @vlc.CallbackDecorators.MediaCloseCb
 def media_close_cb(opaque):
     print("CLOSE", opaque)
-    if opaque is None:
-        return
 
     stream_provider = ctypes.cast(opaque, ctypes.POINTER(ctypes.py_object)).contents.value
     stream_provider.release_resources()
@@ -211,8 +205,9 @@ class VLCPlayer(QtCore.QObject):
         self._provider = StreamProviderDir('.', 'ts')
     
     def play(self):
+        self._player.audio_set_volume(100)
         self._player.play()
-        print(self._player.get_hwnd())
+        # print(self._player.get_hwnd())
 
     def stop(self):
         self._player.stop()
