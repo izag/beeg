@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -114,13 +114,14 @@ class MainWindow:
         self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         self.menu_bar.add_command(label="Link", command=self.copy_model_link)
-        self.menu_bar.add_command(label="Play", command=self.copy_recording_path)
+        # self.menu_bar.add_command(label="Play", command=self.copy_recording_path)
         # self.menu_bar.add_command(label="View", command=self.show_player_window)
 
         root.config(menu=self.menu_bar)
 
         self.record_sessions = {}
         self.show_image = False
+        self.record_started = False
         self.hist_window = None
 
         self.model_name = None
@@ -129,6 +130,8 @@ class MainWindow:
         self.level = 0
 
         self.image_label = Label(root)
+        # self.image_label = Canvas(root, bd=0, highlightthickness=0)
+        # self.bg_img = None
 
         self.level += 1
         self.cb_model = ttk.Combobox(root, width=60)
@@ -154,8 +157,8 @@ class MainWindow:
         self.btn_next = Button(root, text="Next >>", command=lambda: self.next_favorite(True))
         self.btn_next.grid(row=self.level, column=2, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.btn_scan = Button(root, text="Scan On", command=self.toggle_scan)
-        self.btn_scan.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_play = Button(root, text="Play", command=self.play_recording)
+        self.btn_play.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.btn_show_recording = Button(root,
@@ -173,12 +176,12 @@ class MainWindow:
         img = Image.open('assets/rec_small.png')
         self.img_record = ImageTk.PhotoImage(img)
         self.btn_start = Button(root, image=self.img_record, command=self.on_btn_start)
-        self.btn_start.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_start.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         img = Image.open('assets/stop_small.png')
         self.img_stop = ImageTk.PhotoImage(img)
         self.btn_stop = Button(root, image=self.img_stop, command=self.on_btn_stop)
-        self.btn_stop.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
+        # self.btn_stop.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
@@ -231,13 +234,19 @@ class MainWindow:
         self.edges = {}
 
     def on_btn_start(self):
+        if self.record_started:
+            self.on_btn_stop()
+            self.record_started = False
+            self.btn_start.config(image=self.img_record)
+            return
+
         session = self.record_sessions.get(self.model_name, None)
         if session is not None and session.is_alive():
             return
         
         success = self.update_base_url(True)
         if not success:
-            return False
+            return
         
         if self.base_url is None or self.resolution is None:
             get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
@@ -260,17 +269,15 @@ class MainWindow:
         self.record_sessions[self.model_name] = session
         session.start()
 
-        self.update_title()
+        self.record_started = True
+        self.btn_start.config(image=self.img_stop)
         self.add_to_favorites()
         self.process_online_model()
         self.disable_for_update(NORMAL)
 
     def on_btn_stop(self):
-        # self.btn_stop.config(state=DISABLED)
         self.stop()
         self.update_title()
-        # self.set_default_state()
-        # self.btn_stop.config(state=NORMAL)
 
     def stop(self):
         session = self.record_sessions.get(self.model_name, None)
@@ -289,7 +296,7 @@ class MainWindow:
     def copy_model_link(self):
         clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
 
-    def copy_recording_path(self):
+    def play_recording(self):
         session = self.record_sessions.get(self.model_name, None)
         if session is None or not session.is_alive():
             return
@@ -364,14 +371,14 @@ class MainWindow:
     def process_online_model(self):
         self.img_url = HTTP_IMG_URL + self.model_name
         self.update_title()
-        self.set_scan(False)
+        # self.set_scan(False)
         self.start_load_image()
 
     def disable_for_update(self, new_state):
         self.btn_update.config(state=new_state)
         self.btn_prev.config(state=new_state)
         self.btn_next.config(state=new_state)
-        self.btn_scan.config(state=new_state)
+        self.btn_play.config(state=new_state)
         self.btn_copy.config(state=new_state)
         self.btn_paste.config(state=new_state)
         self.btn_start.config(state=new_state)
@@ -594,6 +601,15 @@ class MainWindow:
 
     def update_image(self, img):
         self.model_image = ImageTk.PhotoImage(img)
+        # width, height = img.size
+        # self.image_label.config(width=width, height=height)
+        # x_center = width // 2
+        # y_center = height // 2
+        # if self.bg_img is None:
+        #     self.bg_img = self.image_label.create_image(x_center, y_center, image=self.model_image)
+        # else:
+        #     self.image_label.itemconfigure(self.bg_img, image=self.model_image)
+        #     self.image_label.coords(self.bg_img, x_center, y_center)
         self.image_label.config(image=self.model_image)
 
     def on_close(self):
@@ -634,6 +650,8 @@ class MainWindow:
         self.btn_update.configure(background='SystemButtonFace')
 
         if self.model_name is None:
+            self.record_started = False
+            self.btn_start.config(image=self.img_record, state=DISABLED)
             root.title(f'({len(self.record_sessions)}) <Undefined>')
             return
         
@@ -647,6 +665,10 @@ class MainWindow:
                 root.title(f'({len(self.record_sessions)}) {edge_addr} : {self.model_name} ({best_bandwidth}) ')
 
         session = self.record_sessions.get(self.model_name, None)
+
+        self.record_started = session is not None and session.is_alive();
+        self.btn_start.config(state=NORMAL, image=self.img_stop if self.record_started else self.img_record)
+
         if session is None:
             return
 
@@ -658,6 +680,7 @@ class MainWindow:
 
         root.title(root.title() + " - Recording")
         self.btn_update.configure(background='green')
+        self.record_started
 
     def update_active_records(self, model_name):
         self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
@@ -695,7 +718,7 @@ class MainWindow:
             # self.image_label.grid_forget()
             self.image_label.place_forget()
             self.show_image = False
-            self.set_scan(False)
+            # self.set_scan(False)
             try:
                 root.after_cancel(self.load_image_task_id)
             except ValueError:
@@ -762,11 +785,11 @@ class MainWindow:
             else:
                 self.scan_idx = (values.index(name) + 1) % sz
             self.repeat = N_REPEAT
-            self.btn_scan.config(text="Scan Off")
+            self.btn_play.config(text="Scan Off")
             return
 
         self.scan_idx = -1
-        self.btn_scan.config(text="Scan On")
+        self.btn_play.config(text="Scan On")
 
     def next_favorite(self, forward):
         input_url = self.cb_model.get().strip()
@@ -1161,7 +1184,7 @@ class RecordSession(Thread):
         self.logger.addHandler(fh)
         self.hist_logger = rating_logger
 
-        self.record_executor = ThreadPoolExecutor(max_workers=5)
+        self.record_executor = ThreadPoolExecutorWithQueueSizeLimit(max_workers=1)
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
