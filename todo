@@ -2,15 +2,25 @@ http://chaturbate.com/tours/3/?p=1&c=1000
 https://chaturbate.com/feed/latest/?gender=f&wm=ran3z
 
 
-
-- scan favorites mode with model updating
+beeg:
+- favorites 
 - ping history items
 - view 240-low-res samples
-- 'plus'-button adds to history
 - extract common code, move specific code to settings
-- multiple record sessions
 - models' aliases
 - 'remove offline' menu
+- picture in picture
+- go to next/prev recording model
+- total records count
+- record from clipboard
+- movement detection (nudity detection)
+- different color for short recording
+
+viewer:
+- refresh list
+- pagination
+- categories, tags
+
 
 
 https://sourceforge.net/p/chaturbate/code/ci/master/tree/edit.php#l30
@@ -18,3 +28,7 @@ https://m.gfy.com/fucking-around-and-business-discussion/1341908-cams-chaturbate
 https://chaturbate.com/api/public/affiliates/onlinerooms/?wm=2DLMP&client_ip=%20212.104.79.61
 
 https://github.com/Strangemother/python-vlc-player
+
+https://chaturbate.com/api/ts/roomlist/room-list/?limit=90&offset=0
+https://chaturbate.com/api/ts/roomlist/room-list/?genders=f&limit=90&offset=0
+https://chaturbate.com/api/ts/roomlist/room-list/?genders=c&limit=90&offset=0

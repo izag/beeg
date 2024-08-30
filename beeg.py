@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -144,7 +144,7 @@ class MainWindow:
         self.btn_add = Button(root, text="+", command=self.add_to_favorites)
         self.btn_add.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.btn_remove = Button(root, text="-", command=self.remove_from_favorites)
+        self.btn_remove = Button(root, text=" - ", command=self.remove_from_favorites)
         self.btn_remove.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
@@ -161,11 +161,8 @@ class MainWindow:
         self.btn_play.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
-        self.btn_show_recording = Button(root,
-                                         text="Show recording model",
-                                         command=self.show_recording_model,
-                                         state=DISABLED)
-        self.btn_show_recording.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_record_short = Button(root, text="Record short", command=lambda: self.on_record(120))
+        self.btn_record_short.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_copy = Button(root, text="Copy", command=self.copy_model_name)
         self.btn_copy.grid(row=self.level, column=1, sticky=W + E, padx=PAD, pady=PAD)
@@ -239,7 +236,10 @@ class MainWindow:
             self.record_started = False
             self.btn_start.config(image=self.img_record)
             return
+        
+        self.on_record(0)
 
+    def on_record(self, duration):
         session = self.record_sessions.get(self.model_name, None)
         if session is not None and session.is_alive():
             return
@@ -250,22 +250,22 @@ class MainWindow:
         
         if self.base_url is None or self.resolution is None:
             get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f))
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, duration))
             return
 
-        self.start_recording()
+        self.start_recording(duration)
 
-    def after_successful_start(self, future):
+    def after_successful_start(self, future, duration):
         success = future.result()
         if not success:
             self.set_undefined_state()
             self.disable_for_update(NORMAL)
             return
 
-        self.start_recording()
+        self.start_recording(duration)
 
-    def start_recording(self):
-        session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger)
+    def start_recording(self, duration):
+        session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger, duration)
         self.record_sessions[self.model_name] = session
         session.start()
 
@@ -383,6 +383,7 @@ class MainWindow:
         self.btn_paste.config(state=new_state)
         self.btn_start.config(state=new_state)
         self.btn_stop.config(state=new_state)
+        self.btn_record_short.config(state=new_state)
         if self.hist_window is not None:
             self.hist_window.list_box.config(state=new_state)
 
@@ -638,7 +639,7 @@ class MainWindow:
         # self.session = None
         self.btn_stop.config(state=DISABLED)
         self.btn_start.config(state=NORMAL)
-        self.btn_show_recording.config(state=DISABLED)
+        self.btn_record_short.config(state=NORMAL)
         self.progress.stop()
         self.progress.grid_forget()
         self.update_title()
@@ -1155,7 +1156,7 @@ POOL = SessionPool(1)
 class RecordSession(Thread):
     MIN_CHUNKS = 6
 
-    def __init__(self, main_win, url_base, model, chunk_url, rating_logger):
+    def __init__(self, main_win, url_base, model, chunk_url, rating_logger, duration = 0):
         super(RecordSession, self).__init__()
 
         self.http_session = requests.Session()
@@ -1173,6 +1174,7 @@ class RecordSession(Thread):
         self.daemon = True
         self.file_num = 1
         self.file_deq = deque(maxlen=4)
+        self.duration = duration
 
         self.logger = logging.getLogger(f'record_{self.model_name}')
         self.logger.setLevel(logging.INFO)
@@ -1226,8 +1228,10 @@ class RecordSession(Thread):
         self.logger.info(f"Started {self.model_name}!")
         fails = 0
         last_pos = 0
+        start_time = time.time()
+        end_time = start_time + self.duration;
 
-        while not self.stopped:
+        while not self.stopped and (self.duration <= 0 or time.time() < end_time):
             chunks = self.get_chunks()
             if chunks is None:
                 self.logger.info("Offline : " + self.chunks_url)

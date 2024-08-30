@@ -15,6 +15,7 @@ from urllib3 import Retry
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
+from threading import Event
 
 
 PAD = 5
@@ -22,11 +23,19 @@ TIMEOUT = (3.05, 9.05)
 IMG_WIDTH = 300
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
 
-HEADERS = {
-    'User-agent': USER_AGENT,
+IMG_HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Referer': 'https://chaturbate.com',
+    'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
 }
 
-executor = ThreadPoolExecutor(max_workers=20)
+executor = ThreadPoolExecutor(max_workers=5)
 root = Tk()
 
 firefox_profile = webdriver.FirefoxProfile('C:\\Users\\Gregory\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\zlk8ndod.default-release\\')
@@ -46,8 +55,11 @@ class MainWindow:
         self.btn_back = Button(frm_top, text="Back", command=self.go_back)
         self.btn_back.grid(row=0, column=0, sticky=EW)
 
-        self.btn_reload = Button(frm_top, text="Reload", command=self.show_page_in_thread)
-        self.btn_reload.grid(row=0, column=1, sticky=EW)    
+        self.btn_reload = Button(frm_top, text="Home", command=self.show_page_in_thread)
+        self.btn_reload.grid(row=0, column=1, sticky=EW)
+
+        self.btn_refresh = Button(frm_top, text="Refresh", command=self.refresh_in_thread)
+        self.btn_refresh.grid(row=0, column=2, sticky=EW)     
 
         self.frm_main = ScrollFrame(root)
         self.image_buttons = fill_panel(self.frm_main.view_port)
@@ -57,119 +69,157 @@ class MainWindow:
 
         self.hist_stack = []
 
-    def show_page_in_thread(self):
-        self.set_controls_state(DISABLED)
-        future = executor.submit(self.show_page)
-        future.add_done_callback(lambda f: self.set_controls_state(NORMAL))
+        self.loading_task = None
+        self.stop_event = Event()
 
-    def show_page(self):
+    def show_page_in_thread(self):
         global root
 
-        root.after_idle(self.frm_main.scroll_top_left)
+        if self.loading_task is not None and not self.loading_task.done():
+            if not self.loading_task.cancel():
+                self.stop_event.set()
 
+        root.title('<Undefined>')
+        self.set_controls_state(DISABLED)
+        self.frm_main.scroll_top_left()
+        for btn in self.image_buttons:
+            btn.reset()
+        
+        self.loading_task = executor.submit(self.show_page)
+        self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
+
+    def show_page(self):
         result = get_all()
-
-        self.reconfigure_buttons(self.image_buttons, list(result['models'].values()))
+        models = [(model['username'], model['img']) for model in result['rooms']]
+        self.reconfigure_buttons(models)
 
 
     def show_page_more_like_in_thread(self, model, remember):
         global root
+
+        if self.loading_task is not None and not self.loading_task.done():
+            if not self.loading_task.cancel():
+                self.stop_event.set()
 
         root.title(model or '<Undefined>')
         self.set_controls_state(DISABLED)
 
         if remember and (model is not None) and (len(self.hist_stack) == 0 or (model != self.hist_stack[-1])):
             self.hist_stack.append(model)
-        
-        future = executor.submit(self.show_page_more_like, model)
-        future.add_done_callback(lambda f: self.set_controls_state(NORMAL))
+
+        self.frm_main.scroll_top_left()
+        for btn in self.image_buttons:
+            btn.reset()
+
+        self.loading_task = executor.submit(self.show_page_more_like, model)
+        self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
     def show_page_more_like(self, model):
-        global root
-
-        root.after_idle(self.frm_main.scroll_top_left)
-
         result = get_more_like(model)
+        models = [(model['room'], model['img']) for model in result['rooms']]
+        self.reconfigure_buttons(models)
 
-        self.reconfigure_buttons_more_like(self.image_buttons, result['rooms'])
+    def refresh_in_thread(self):
+        if self.loading_task is not None and not self.loading_task.done():
+            if not self.loading_task.cancel():
+                self.stop_event.set()
+
+        self.set_controls_state(DISABLED)
+        self.frm_main.scroll_top_left()
+        
+        self.loading_task = executor.submit(self.refresh)
+        self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
     def set_controls_state(self, status):
+        self.btn_back.config(state=status)
         self.btn_reload.config(state=status)
+        self.btn_refresh.config(state=status)
 
         # for btn in self.image_buttons:
         #     btn.config(state=status)
 
-    def reconfigure_buttons(self, buttons, models):
-        headers = {
-            'User-Agent': USER_AGENT,
-            'Referer': 'https://chaturbate.com',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-        }
-
+    def reconfigure_buttons(self, models):
         http_session = requests.Session()
-        http_session.headers.update(headers)
+        http_session.headers.update(IMG_HEADERS)
 
         try:
-            # for btn in buttons:
-                # btn.reset()
-
             i = 0
-            for button in buttons:
-                model_info = models[i]
-                self.reconfigure_button(http_session, button, model_info['username'], model_info['image_url'])
-                i += 1
-        except BaseException as error:
-            print(error)
-            traceback.print_exc()
-        finally:
-            http_session.close()
+            for button in self.image_buttons:
+                if self.stop_event.is_set():
+                    break
 
-    def reconfigure_buttons_more_like(self, buttons, models):
-        headers = {
-            'User-Agent': USER_AGENT,
-            'Referer': 'https://chaturbate.com',
-            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-        }
-
-        http_session = requests.Session()
-        http_session.headers.update(headers)
-
-        try:
-            for btn in buttons:
-                btn.reset()
-
-            i = 0
-            for button in buttons:
                 if i >= len(models):
                     break
 
-                model_info = models[i]
-                self.reconfigure_button(http_session, button, model_info['room'], model_info['img'])
+                username, img_url = models[i]
+                self.reconfigure_button(http_session, button, username, img_url)
                 i += 1
         except BaseException as error:
             print(error)
             traceback.print_exc()
         finally:
+            self.stop_event.clear()
             http_session.close()
+
+
+    def refresh(self):
+        http_session = requests.Session()
+        http_session.headers.update(IMG_HEADERS)
+
+        try:
+            for button in self.image_buttons:
+                if self.stop_event.is_set():
+                    break
+
+                self.reconfigure_button(http_session, button, button.link, button.img_url)
+        except BaseException as error:
+            print(error)
+            traceback.print_exc()
+        finally:
+            self.stop_event.clear()
+            http_session.close()
+
+    # def reconfigure_buttons_more_like(self, buttons, models):
+    #     headers = {
+    #         'User-Agent': USER_AGENT,
+    #         'Referer': 'https://chaturbate.com',
+    #         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+    #         'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    #         'Accept-Encoding': 'gzip, deflate, br',
+    #         'Connection': 'keep-alive',
+    #         'Sec-Fetch-Dest': 'empty',
+    #         'Sec-Fetch-Mode': 'cors',
+    #         'Sec-Fetch-Site': 'same-origin',
+    #     }
+
+    #     http_session = requests.Session()
+    #     http_session.headers.update(headers)
+
+    #     try:
+    #         i = 0
+    #         for button in buttons:
+    #             if i >= len(models):
+    #                 break
+
+    #             model_info = models[i]
+    #             self.reconfigure_button(http_session, button, model_info['room'], model_info['img'])
+    #             i += 1
+    #     except BaseException as error:
+    #         print(error)
+    #         traceback.print_exc()
+    #     finally:
+    #         http_session.close()
 
     def reconfigure_button(self, http_session, btn, url, img_url):
         global root
 
+        if (img_url is None) or (len(img_url) == 0):
+            return
+
         image = download_image(http_session, img_url.replace('/ri/', '/riw/'))
 
         if (image is None) or (len(image) == 0):
+            root.after_idle(btn.reset)
             return
 
         img = Image.open(io.BytesIO(image))
@@ -180,7 +230,7 @@ class MainWindow:
         if photo_image is None:
             return
 
-        root.after_idle(btn.set_values, url, partial(self.show_page_more_like_in_thread, url, True), photo_image)
+        root.after_idle(btn.set_values, url, partial(self.show_page_more_like_in_thread, url, True), photo_image, img_url)
 
     def go_back(self):
         if len(self.hist_stack) == 0:
@@ -192,7 +242,7 @@ class MainWindow:
             self.go_back()
             return
         
-        self.show_page_more_like_in_thread(self.hist_stack.pop(), False)
+        self.show_page_more_like_in_thread(model, False)
 
 
 def fill_panel(panel):
@@ -207,32 +257,40 @@ def fill_panel(panel):
     return buttons
 
 
-def get_all():
-    headers = {
-        'User-Agent': USER_AGENT,
-        'Referer': 'https://chaturbat.net.ru',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'X-Requested-With': 'XMLHttpRequest',
-        'Connection': 'keep-alive',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-    }
+# def get_all():
+#     headers = {
+#         'User-Agent': USER_AGENT,
+#         'Referer': 'https://chaturbat.net.ru',
+#         'Accept': 'application/json, text/javascript, */*; q=0.01',
+#         'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+#         'Accept-Encoding': 'gzip, deflate, br',
+#         'X-Requested-With': 'XMLHttpRequest',
+#         'Connection': 'keep-alive',
+#         'Sec-Fetch-Dest': 'empty',
+#         'Sec-Fetch-Mode': 'cors',
+#         'Sec-Fetch-Site': 'same-origin',
+#     }
 
-    try:
-        with requests.Session() as http_session:
-            http_session.headers.update(headers)
-            http_session.adapters['https://'].max_retries = Retry.DEFAULT
-            scraper = cloudscraper.create_scraper(http_session)
-            r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
-            if r.status_code != 200:
-                return
-            return r.json()
-    except BaseException as error:
-        print(error)
-        traceback.print_exc()
+#     try:
+#         with requests.Session() as http_session:
+#             http_session.headers.update(headers)
+#             http_session.adapters['https://'].max_retries = Retry.DEFAULT
+#             scraper = cloudscraper.create_scraper(http_session)
+#             r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
+#             if r.status_code != 200:
+#                 return
+#             return r.json()
+#     except BaseException as error:
+#         print(error)
+#         traceback.print_exc()
+
+
+def get_all():
+    driver.get(f'view-source:https://chaturbate.com/api/ts/roomlist/room-list/?limit=100&offset=0')
+
+    content = driver.page_source
+    content = driver.find_element(By.TAG_NAME, 'pre').text
+    return json.loads(content)
 
 
 def get_more_like(model):
@@ -248,13 +306,7 @@ def download_image(http_session, url):
     if response.status_code == 404:
         return None
 
-    image = response.content
-
-    # if DEBUG:
-    #     with open(get_filename(url), 'wb') as f:
-    #         f.write(image)
-
-    return image
+    return response.content
 
 
 class LinkButton(Button):
@@ -265,6 +317,7 @@ class LinkButton(Button):
         super().bind("<Button-3>", self.copy_link)
         self.link = None
         self.image = None
+        self.img_url = None
         self.tip = Hovertip(self, text=None, hover_delay=100)
 
     def copy_link(self, event):
@@ -273,10 +326,14 @@ class LinkButton(Button):
     def reset(self):
         self.config(image='', command=None, background="SystemButtonFace")
         self.link = None
+        self.img_url = None
+        self.image = None
+        self.tip.text = None
 
-    def set_values(self, url, cmd, img):
+    def set_values(self, url, cmd, img, img_url):
         self.config(image=img, command=cmd)
         self.image = img
+        self.img_url = img_url
         self.link = url
         self.tip.text = url
 
@@ -346,7 +403,7 @@ class ScrollFrame(Frame):
 
 if __name__ == "__main__":
     root.geometry("1044x720+0+0")
-    root.title("Lalala")
+    root.title("<Undefined>")
     main_win = MainWindow()
     root.mainloop()
     driver.quit()
