@@ -32,3 +32,72 @@ https://github.com/Strangemother/python-vlc-player
 https://chaturbate.com/api/ts/roomlist/room-list/?limit=90&offset=0
 https://chaturbate.com/api/ts/roomlist/room-list/?genders=f&limit=90&offset=0
 https://chaturbate.com/api/ts/roomlist/room-list/?genders=c&limit=90&offset=0
+
+
+POST /get_edge_hls_url_ajax/ HTTP/2
+Host: chaturbate.com
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0
+Accept: */*
+Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3
+Accept-Encoding: gzip, deflate, br, zstd
+Referer: https://chaturbate.com/_cherry1/
+X-NewRelic-ID: VQIGWV9aDxACUFNVDgMEUw==
+newrelic: eyJ2IjpbMCwxXSwiZCI6eyJ0eSI6IkJyb3dzZXIiLCJhYyI6IjE0MTg5OTciLCJhcCI6IjI0NTA2NzUwIiwiaWQiOiJlMjc0YmViMDVjNmExZGYzIiwidHIiOiI1MzZmNWNmYzQxZmNlZDdmZDEzMmQ3NmU0NGMyYmY0NSIsInRpIjoxNzI1NjkyNTQ1NzU0fX0=
+traceparent: 00-536f5cfc41fced7fd132d76e44c2bf45-e274beb05c6a1df3-01
+tracestate: 1418997@nr=0-1-1418997-24506750-e274beb05c6a1df3----1725692545754
+X-Requested-With: XMLHttpRequest
+Content-Type: multipart/form-data; boundary=---------------------------163966829833868710731438088218
+Content-Length: 454
+Origin: https://chaturbate.com
+DNT: 1
+Sec-GPC: 1
+Connection: keep-alive
+Cookie: csrftoken=YJknQhCvMedkpZjCROBzO3OW0YwVxPIO; affkey=eJyrVipSslJQUtJRUEoBMYwMjEx0DSx1DcyUagFVLAXQ; sbr=sec:sbrd5234dde-75ab-47ff-9fbf-d683350bc4db:1smpEZ:ejvrsiY3M5lC8o2io12tmMv7jbvgU7GV9wtg026yX58; __cf_bm=XQR0ROji8QeJEYVHr_EF5T5Uqm4JBgrV6nZhNplKeUE-1725691667-1.0.1.1-IkYwvJouqKX4GN9dLJX2Qvf025aO8KNCiGic_7Pd0nvW75ZreVbLs8sA1GM6ez0I4m0DMIKDWdyFIbrwvkXnUQ; cf_clearance=mGp4eZY3f0h1_XPzzDvN3gAx8ybh0GPXyy0WcDeo6po-1725691676-1.2.1.1-clORJSfXCbb3qSvgl3wn9BBu_0rLwEC.un0vmHP71bl_UPsBbgxvf9y35dvX.QRaOF4BMcstdBPZgVSU916f07Blk2CHG8iH93KtCJlAnlEkxG8sy4KEWlpHz.RQ1rmHo_7IPngXAAloV7raSGuKlHkpGsBDlXbxAacUsPAv6ucKV20W1CDK08NNQqUVQ7NPGVdRWNW4rP.Wz9aflyWD9k.V0YOa9BlH7nhDeDZuQcAg9jqCAUlITT5g7mz7t.YvQ5XCh5ZZ2F5q351Aim4hJ4kEEFXD3ZB7jicEmxkj5lM0Dx19joJ_aRDfwIJbqhlHclYyKrMtk4KKGtm_w9mp7w; __utfpp=f:trnx61cff0a74cb6c063211bdccb05f4d899:1smpEj:DekIEBz4ea4jtz7xP_ROoSK9rB001LDy12uAUyVGSW4; agreeterms=1; options="teen\05418to21\05420to30\05430to50\054mature:f\054m\054c\054s\054tf\054tm\054tn:NA\054SA\054AS\054ER\054O:on:60"; _sp_ses.825f=*; _sp_id.825f=9966b50d-07d9-4fe9-959b-f60fb51a0be1.1725691827.1.1725692412..6a5897bf-05dd-44e0-98d4-ffdb1badeaf7..571088b8-edbb-4fa3-aea8-771595d1656a.1725691827289.70; ag={"teen-cams":35,"18to21-cams":61,"20to30-cams":59}
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-origin
+
+
+-----------------------------163966829833868710731438088218
+Content-Disposition: form-data; name="room_slug"
+
+_cherry1
+-----------------------------163966829833868710731438088218
+Content-Disposition: form-data; name="jpeg"
+
+1
+-----------------------------163966829833868710731438088218
+Content-Disposition: form-data; name="csrfmiddlewaretoken"
+
+YJknQhCvMedkpZjCROBzO3OW0YwVxPIO
+-----------------------------163966829833868710731438088218--
+
+{
+  "success": true,
+  "url": "https://edge23-ams.live.mmcdn.com/live-hls/amlst:_cherry1-sd-178225a5d735460145275b8b99b8b7e7546b5fa526b3ee112e82e0c49d2be9ac_trns_h264/playlist.m3u8",
+  "room_status": "public",
+  "hidden_message": "",
+  "cbjpeg_url": "https://jpeg.live.mmcdn.com/stream?room=_cherry1"
+}
+
+
+
+
+
+
+
+
+GET /stream?room=_cherry1&f=0.4198364919875903 HTTP/2
+Host: jpeg.live.mmcdn.com
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:129.0) Gecko/20100101 Firefox/129.0
+Accept: image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5
+Accept-Language: ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3
+Accept-Encoding: gzip, deflate, br, zstd
+Referer: https://chaturbate.com/
+DNT: 1
+Sec-GPC: 1
+Connection: keep-alive
+Sec-Fetch-Dest: image
+Sec-Fetch-Mode: no-cors
+Sec-Fetch-Site: cross-site
+Priority: u=5, i

@@ -1,15 +1,21 @@
 import io
 import json
+import random
+import time
+from tkinter import ttk
+from tkinter.ttk import Style
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from idlelib.tooltip import Hovertip
-from tkinter import Tk, Frame, NSEW, BOTH, Button, Scrollbar, Canvas, VERTICAL, HORIZONTAL, RIGHT, Y, BOTTOM, X, LEFT, \
+from tkinter import E, W, Label, Tk, Frame, NSEW, BOTH, Button, Scrollbar, Canvas, VERTICAL, HORIZONTAL, RIGHT, Y, BOTTOM, X, LEFT, \
     NW, EW, DISABLED, NORMAL
+from tkinter.font import Font, nametofont
 
 import clipboard
 import cloudscraper
 import requests
+from queue import Queue
 from PIL import Image, ImageTk
 from urllib3 import Retry
 from selenium import webdriver
@@ -17,6 +23,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from threading import Event
 
+
+random.seed()
 
 PAD = 5
 TIMEOUT = (3.05, 9.05)
@@ -35,6 +43,26 @@ IMG_HEADERS = {
     'Sec-Fetch-Site': 'same-origin',
 }
 
+STREAM_HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Referer': 'https://chaturbate.com',
+    'Accept': 'image/avif,image/webp,image/png,image/svg+xml,image/*;q=0.8,*/*;q=0.5',
+    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'DNT': '1',
+    'Connection': 'keep-alive',
+    'Sec-GPC': '1',
+    'Sec-Fetch-Dest': 'image',
+    'Sec-Fetch-Mode': 'no-cors',
+    'Sec-Fetch-Site': 'cross-site',
+    'Priority': 'u=5, i'
+}
+
+class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
+    def __init__(self, maxsize=1, *args, **kwargs):
+        super(ThreadPoolExecutorWithQueueSizeLimit, self).__init__(*args, **kwargs)
+        self._work_queue = Queue(maxsize=maxsize)
+
 executor = ThreadPoolExecutor(max_workers=5)
 root = Tk()
 
@@ -43,6 +71,10 @@ firefox_profile.set_preference('browser.privatebrowsing.autostart', True)
 options = Options()
 options.profile = firefox_profile
 driver = webdriver.Firefox(options=options)
+
+image_loader_session = requests.Session()
+image_loader_session.headers.update(STREAM_HEADERS)
+HTTP_IMG_URL = "https://jpeg.live.mmcdn.com/stream?room="
 
 
 class MainWindow:
@@ -59,18 +91,30 @@ class MainWindow:
         self.btn_reload.grid(row=0, column=1, sticky=EW)
 
         self.btn_refresh = Button(frm_top, text="Refresh", command=self.refresh_in_thread)
-        self.btn_refresh.grid(row=0, column=2, sticky=EW)     
+        self.btn_refresh.grid(row=0, column=2, sticky=EW)
 
         self.frm_main = ScrollFrame(root)
-        self.image_buttons = fill_panel(self.frm_main.view_port)
+        self.image_buttons = self.fill_panel(self.frm_main.view_port)
+
+        self.canvas = Canvas(root, width=200, height=100, bg="black", bd=0, highlightthickness=0)
 
         frm_top.pack(fill=X)
-        self.frm_main.pack(fill=BOTH, expand=1)
+        self.canvas.pack(pady=10)
+        self.frm_main.pack(fill=BOTH, expand=True)
 
         self.hist_stack = []
 
         self.loading_task = None
         self.stop_event = Event()
+        
+        self.image_loader = ThreadPoolExecutor(max_workers=1)
+        self.image_loader_future = None
+        self.image_loader_stop_event = Event()
+
+        self.main_image_loader = ThreadPoolExecutor(max_workers=1)
+        self.main_image_loader_future = None
+        self.main_image_loader_stop_event = Event()
+        self.main_image = None
 
     def show_page_in_thread(self):
         global root
@@ -93,7 +137,6 @@ class MainWindow:
         models = [(model['username'], model['img']) for model in result['rooms']]
         self.reconfigure_buttons(models)
 
-
     def show_page_more_like_in_thread(self, model, remember):
         global root
 
@@ -114,6 +157,16 @@ class MainWindow:
         self.loading_task = executor.submit(self.show_page_more_like, model)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
+        self.load_main_image_in_thread(model)
+
+    def load_main_image_in_thread(self, model):
+        if self.main_image_loader_future is not None and not self.main_image_loader_future.done():
+            if not self.main_image_loader_future.cancel():
+                self.main_image_loader_stop_event.set()
+
+        self.main_image_loader_future = self.main_image_loader.submit(self.fetch_image_main, model)
+
+
     def show_page_more_like(self, model):
         result = get_more_like(model)
         models = [(model['room'], model['img']) for model in result['rooms']]
@@ -125,7 +178,7 @@ class MainWindow:
                 self.stop_event.set()
 
         self.set_controls_state(DISABLED)
-        self.frm_main.scroll_top_left()
+        # self.frm_main.scroll_top_left()
         
         self.loading_task = executor.submit(self.refresh)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
@@ -144,7 +197,7 @@ class MainWindow:
 
         try:
             i = 0
-            for button in self.image_buttons:
+            for cell in self.image_buttons:
                 if self.stop_event.is_set():
                     break
 
@@ -152,7 +205,7 @@ class MainWindow:
                     break
 
                 username, img_url = models[i]
-                self.reconfigure_button(http_session, button, username, img_url)
+                self.reconfigure_button(http_session, cell, username, img_url)
                 i += 1
         except BaseException as error:
             print(error)
@@ -167,11 +220,12 @@ class MainWindow:
         http_session.headers.update(IMG_HEADERS)
 
         try:
-            for button in self.image_buttons:
+            for cell in self.image_buttons:
                 if self.stop_event.is_set():
                     break
 
-                self.reconfigure_button(http_session, button, button.link, button.img_url)
+                button = cell.img_button
+                self.reconfigure_button(http_session, cell, button.link, button.img_url)
         except BaseException as error:
             print(error)
             traceback.print_exc()
@@ -210,7 +264,7 @@ class MainWindow:
     #     finally:
     #         http_session.close()
 
-    def reconfigure_button(self, http_session, btn, url, img_url):
+    def reconfigure_button(self, http_session, cell, url, img_url):
         global root
 
         if (img_url is None) or (len(img_url) == 0):
@@ -219,18 +273,18 @@ class MainWindow:
         image = download_image(http_session, img_url.replace('/ri/', '/riw/'))
 
         if (image is None) or (len(image) == 0):
-            root.after_idle(btn.reset)
+            root.after_idle(cell.reset)
             return
 
         img = Image.open(io.BytesIO(image))
         w, h = img.size
         k = IMG_WIDTH / w
-        img_resized = img.resize((IMG_WIDTH, int(h * k)))
+        img_resized = img.resize((IMG_WIDTH, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
         photo_image = ImageTk.PhotoImage(img_resized)
         if photo_image is None:
             return
 
-        root.after_idle(btn.set_values, url, partial(self.show_page_more_like_in_thread, url, True), photo_image, img_url)
+        root.after_idle(cell.set_values, url, photo_image, img_url)
 
     def go_back(self):
         if len(self.hist_stack) == 0:
@@ -244,18 +298,102 @@ class MainWindow:
         
         self.show_page_more_like_in_thread(model, False)
 
+    def fill_panel(self, panel):
+        buttons = []
+        for i in range(20):
+            for j in range(5):
+                btn = ModelFrame(self, panel)
+                btn.grid(row=i, column=j, sticky=NSEW, padx=PAD, pady=PAD)
+                buttons.append(btn)
 
-def fill_panel(panel):
-    buttons = []
-    for i in range(20):
-        for j in range(5):
-            btn = LinkButton(panel, text=f"({i}, {j})")
-            btn.link = None
-            btn.grid(row=i, column=j, sticky=NSEW, padx=PAD, pady=PAD)
-            buttons.append(btn)
+        return buttons
+    
+    def on_enter(self, event):
+        if event.widget.link is None:
+            return
+        
+        print(f"entered {event.widget.link}")
+        
+        if self.image_loader_future is not None and not self.image_loader_future.done():
+            if not self.image_loader_future.cancel():
+                self.image_loader_stop_event.set()
 
-    return buttons
+        self.image_loader_future = self.image_loader.submit(self.fetch_image, event.widget)
+        print(f"submited {event.widget.link}")
+        # self.image_loader_future.add_done_callback(lambda f: event.widgetself.set_controls_state(NORMAL))
 
+    def on_leave(self, event):
+        if self.image_loader_future is not None and not self.image_loader_future.done():
+            print(f"leaved {event.widget.link}")
+            if not self.image_loader_future.cancel():
+                self.image_loader_stop_event.set()
+                print(f"set {event.widget.link}")
+            else:
+                print(f"canceled {event.widget.link}")
+
+    def fetch_image(self, button):
+        global root
+        time.sleep(0.5)
+
+        try:
+            while not self.image_loader_stop_event.is_set():
+                img_url = HTTP_IMG_URL + button.link + f"&f={random.random()}"
+                # print(img_url)
+                
+                response = image_loader_session.get(img_url, timeout=TIMEOUT)
+                if response.status_code != 200:
+                    return
+                
+                img = Image.open(io.BytesIO(response.content))
+                w, h = img.size
+                k = IMG_WIDTH / w
+                img_resized = img.resize((IMG_WIDTH, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
+                photo_image = ImageTk.PhotoImage(img_resized)
+                root.after_idle(button.set_image, photo_image)
+
+                time.sleep(0.1)
+        except BaseException as error:
+            print("Exception URL: " + HTTP_IMG_URL + button.link)
+            print(error)
+            traceback.print_exc()
+        finally:
+            self.image_loader_stop_event.clear()
+
+
+    def fetch_image_main(self, model):
+        global root
+
+        try:
+            while not self.main_image_loader_stop_event.is_set():
+                img_url = HTTP_IMG_URL + model + f"&f={random.random()}"
+                # print(img_url)
+
+                response = image_loader_session.get(img_url, timeout=TIMEOUT)
+                if response.status_code != 200:
+                    return
+
+                img = Image.open(io.BytesIO(response.content))
+                photo_image = ImageTk.PhotoImage(img)
+                root.after_idle(self.update_main_image, photo_image)
+
+                time.sleep(0.5)
+        except BaseException as error:
+            print("Exception URL: " + HTTP_IMG_URL + model)
+            print(error)
+            traceback.print_exc()
+        finally:
+            self.main_image_loader_stop_event.clear()
+
+    def update_main_image(self, photo_image):
+        w = photo_image.width()
+        h = photo_image.height()
+        x_center = w // 2
+        y_center = h // 2
+        self.canvas.config(width=w, height=h)
+        if self.main_image is None:
+            self.main_image = self.canvas.create_image(x_center, y_center, image=photo_image)
+        else:
+            self.canvas.itemconfigure(self.main_image, image=photo_image)
 
 # def get_all():
 #     headers = {
@@ -309,16 +447,41 @@ def download_image(http_session, url):
     return response.content
 
 
+class ModelFrame(Frame):
+    def __init__(self, win, parent, cnf={}, **kw):
+        super().__init__(parent, cnf, **kw)  # create a frame (self)
+
+        self.img_button = LinkButton(win, self, text="None")
+        self.img_button.link = None
+        self.model = None
+        self.name = HyperLinkButton(self)
+        self.main_win = win
+
+        self.img_button.grid(row=0, column=0)
+        self.name.grid(row=1, column=0)
+
+    def reset(self):
+        self.img_button.reset()
+        self.name.config(text=None, command=None)
+        self.model = None
+
+    def set_values(self, url, img, img_url):
+        self.img_button.set_values(url, img, img_url)
+        self.model = url
+        self.name.config(text=url, command=lambda: self.main_win.show_page_more_like_in_thread(url, True))
+
+
 class LinkButton(Button):
-    def __init__(self, parent=None, *args, **kw):
+    def __init__(self, win, parent=None, *args, **kw):
         super().__init__(parent, *args, **kw)
-        # super().bind("<Enter>", win.on_enter)
-        # super().bind("<Leave>", win.on_leave)
+        super().bind("<Enter>", win.on_enter)
+        super().bind("<Leave>", win.on_leave)
         super().bind("<Button-3>", self.copy_link)
         self.link = None
         self.image = None
         self.img_url = None
-        self.tip = Hovertip(self, text=None, hover_delay=100)
+        self.main_win = win
+        # self.tip = Hovertip(self, text=None, hover_delay=100)
 
     def copy_link(self, event):
         clipboard.copy(self.link)
@@ -328,14 +491,39 @@ class LinkButton(Button):
         self.link = None
         self.img_url = None
         self.image = None
-        self.tip.text = None
+        # self.tip.text = None
 
-    def set_values(self, url, cmd, img, img_url):
-        self.config(image=img, command=cmd)
+    def set_values(self, url, img, img_url):
+        self.config(image=img, command=lambda: self.main_win.load_main_image_in_thread(url))
         self.image = img
         self.img_url = img_url
         self.link = url
-        self.tip.text = url
+        # self.tip.text = url
+
+    def set_image(self, img):
+        self.config(image=img)
+        self.image = img
+
+
+class HyperLinkButton(ttk.Button):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Use the default font.
+        label_font = nametofont("TkDefaultFont").cget("family")
+        self.font = Font(family=label_font, size=9)
+        # Label-like styling.
+        self.link_style = Style()
+        self.link_style.configure("Link.TLabel", foreground="#357fde", font=self.font)
+        self.configure(style="Link.TLabel", cursor="hand2")
+        self.bind("<Enter>", self.on_mouse_enter)
+        self.bind("<Leave>", self.on_mouse_leave)
+
+    def on_mouse_enter(self, event):
+        self.font.configure(underline=True)
+
+    def on_mouse_leave(self, event):
+        self.font.configure(underline=False)
+
 
 
 class ScrollFrame(Frame):
@@ -407,3 +595,4 @@ if __name__ == "__main__":
     main_win = MainWindow()
     root.mainloop()
     driver.quit()
+    image_loader_session.close()

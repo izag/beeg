@@ -670,17 +670,12 @@ class MainWindow:
         self.record_started = session is not None and session.is_alive();
         self.btn_start.config(state=NORMAL, image=self.img_stop if self.record_started else self.img_record)
 
-        if session is None:
+        if not self.record_started:
             return
 
-        if not session.is_alive():
-            return
-
-        # if root.title().find(session.model_name) == -1:
-        #     return
-
+        session.duration > 0
         root.title(root.title() + " - Recording")
-        self.btn_update.configure(background='green')
+        self.btn_update.configure(background='green' if session.duration > 0 else 'red')
         self.record_started
 
     def update_active_records(self, model_name):
