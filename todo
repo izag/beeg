@@ -20,6 +20,8 @@ viewer:
 - refresh list
 - pagination
 - categories, tags
+- more like model from input text (clipboard)
+- model search
 
 
 

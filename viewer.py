@@ -2,7 +2,7 @@ import io
 import json
 import random
 import time
-from tkinter import ttk
+from tkinter import Menu, Toplevel, ttk
 from tkinter.ttk import Style
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -26,10 +26,12 @@ from threading import Event
 
 random.seed()
 
-PAD = 5
+PAD = 0
 TIMEOUT = (3.05, 9.05)
-IMG_WIDTH = 300
+IMG_WIDTH = 180
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
+ROWS = 24
+COLS = 4
 
 IMG_HEADERS = {
     'User-Agent': USER_AGENT,
@@ -82,6 +84,12 @@ class MainWindow:
     def __init__(self):
         global root
 
+        root.bind("<FocusIn>", self.focus_in_callback)
+
+        # self.menu_bar = Menu(root)
+        # self.menu_bar.add_command(label="Preview", command=self.show_preview)
+        # root.config(menu=self.menu_bar)
+
         frm_top = Frame(root)
 
         self.btn_back = Button(frm_top, text="Back", command=self.go_back)
@@ -90,16 +98,22 @@ class MainWindow:
         self.btn_reload = Button(frm_top, text="Home", command=self.show_page_in_thread)
         self.btn_reload.grid(row=0, column=1, sticky=EW)
 
+        self.btn_couples = Button(frm_top, text="Couples", command=lambda: self.show_page_in_thread('c'))
+        self.btn_couples.grid(row=0, column=2, sticky=EW)
+
+        self.btn_trans = Button(frm_top, text="Trans", command=lambda: self.show_page_in_thread('t'))
+        self.btn_trans.grid(row=0, column=3, sticky=EW)
+
         self.btn_refresh = Button(frm_top, text="Refresh", command=self.refresh_in_thread)
-        self.btn_refresh.grid(row=0, column=2, sticky=EW)
+        self.btn_refresh.grid(row=0, column=4, sticky=EW)
 
         self.frm_main = ScrollFrame(root)
         self.image_buttons = self.fill_panel(self.frm_main.view_port)
 
-        self.canvas = Canvas(root, width=200, height=100, bg="black", bd=0, highlightthickness=0)
+        # self.canvas = Canvas(root, width=200, height=100, bg="black", bd=0, highlightthickness=0)
 
         frm_top.pack(fill=X)
-        self.canvas.pack(pady=10)
+        # self.canvas.pack(pady=10)
         self.frm_main.pack(fill=BOTH, expand=True)
 
         self.hist_stack = []
@@ -111,12 +125,10 @@ class MainWindow:
         self.image_loader_future = None
         self.image_loader_stop_event = Event()
 
-        self.main_image_loader = ThreadPoolExecutor(max_workers=1)
-        self.main_image_loader_future = None
-        self.main_image_loader_stop_event = Event()
-        self.main_image = None
+        self.preview_window = PreviewWindow(self, root)
+        self.preview_window.withdraw()
 
-    def show_page_in_thread(self):
+    def show_page_in_thread(self, gender=None):
         global root
 
         if self.loading_task is not None and not self.loading_task.done():
@@ -129,11 +141,11 @@ class MainWindow:
         for btn in self.image_buttons:
             btn.reset()
         
-        self.loading_task = executor.submit(self.show_page)
+        self.loading_task = executor.submit(self.show_page, gender)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
-    def show_page(self):
-        result = get_all()
+    def show_page(self, gender):
+        result = get_all(gender)
         models = [(model['username'], model['img']) for model in result['rooms']]
         self.reconfigure_buttons(models)
 
@@ -158,14 +170,6 @@ class MainWindow:
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
         self.load_main_image_in_thread(model)
-
-    def load_main_image_in_thread(self, model):
-        if self.main_image_loader_future is not None and not self.main_image_loader_future.done():
-            if not self.main_image_loader_future.cancel():
-                self.main_image_loader_stop_event.set()
-
-        self.main_image_loader_future = self.main_image_loader.submit(self.fetch_image_main, model)
-
 
     def show_page_more_like(self, model):
         result = get_more_like(model)
@@ -277,9 +281,7 @@ class MainWindow:
             return
 
         img = Image.open(io.BytesIO(image))
-        w, h = img.size
-        k = IMG_WIDTH / w
-        img_resized = img.resize((IMG_WIDTH, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
+        img_resized = resize_image(img, IMG_WIDTH)
         photo_image = ImageTk.PhotoImage(img_resized)
         if photo_image is None:
             return
@@ -300,8 +302,8 @@ class MainWindow:
 
     def fill_panel(self, panel):
         buttons = []
-        for i in range(20):
-            for j in range(5):
+        for i in range(ROWS):
+            for j in range(COLS):
                 btn = ModelFrame(self, panel)
                 btn.grid(row=i, column=j, sticky=NSEW, padx=PAD, pady=PAD)
                 buttons.append(btn)
@@ -345,9 +347,7 @@ class MainWindow:
                     return
                 
                 img = Image.open(io.BytesIO(response.content))
-                w, h = img.size
-                k = IMG_WIDTH / w
-                img_resized = img.resize((IMG_WIDTH, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
+                img_resized = resize_image(img, IMG_WIDTH)
                 photo_image = ImageTk.PhotoImage(img_resized)
                 root.after_idle(button.set_image, photo_image)
 
@@ -359,41 +359,17 @@ class MainWindow:
         finally:
             self.image_loader_stop_event.clear()
 
+    def load_main_image_in_thread(self, model):
+        self.menu_bar.entryconfig("Preview", state=DISABLED)
+        self.preview_window.deiconify()
+        self.preview_window.set_model(model)
+        self.preview_window.load_main_image_in_thread()
 
-    def fetch_image_main(self, model):
-        global root
+    def focus_in_callback(self, event):
+        if event.widget != root:
+            return
 
-        try:
-            while not self.main_image_loader_stop_event.is_set():
-                img_url = HTTP_IMG_URL + model + f"&f={random.random()}"
-                # print(img_url)
-
-                response = image_loader_session.get(img_url, timeout=TIMEOUT)
-                if response.status_code != 200:
-                    return
-
-                img = Image.open(io.BytesIO(response.content))
-                photo_image = ImageTk.PhotoImage(img)
-                root.after_idle(self.update_main_image, photo_image)
-
-                time.sleep(0.5)
-        except BaseException as error:
-            print("Exception URL: " + HTTP_IMG_URL + model)
-            print(error)
-            traceback.print_exc()
-        finally:
-            self.main_image_loader_stop_event.clear()
-
-    def update_main_image(self, photo_image):
-        w = photo_image.width()
-        h = photo_image.height()
-        x_center = w // 2
-        y_center = h // 2
-        self.canvas.config(width=w, height=h)
-        if self.main_image is None:
-            self.main_image = self.canvas.create_image(x_center, y_center, image=photo_image)
-        else:
-            self.canvas.itemconfigure(self.main_image, image=photo_image)
+        self.preview_window.lift()
 
 # def get_all():
 #     headers = {
@@ -423,8 +399,13 @@ class MainWindow:
 #         traceback.print_exc()
 
 
-def get_all():
-    driver.get(f'view-source:https://chaturbate.com/api/ts/roomlist/room-list/?limit=100&offset=0')
+def get_all(gender=None):
+    src = f'view-source:https://chaturbate.com/api/ts/roomlist/room-list/?limit={ROWS * COLS}&offset=0'
+
+    if gender is not None:
+        src += f'&genders={gender}'
+
+    driver.get(src)
 
     content = driver.page_source
     content = driver.find_element(By.TAG_NAME, 'pre').text
@@ -445,6 +426,12 @@ def download_image(http_session, url):
         return None
 
     return response.content
+
+
+def resize_image(img, width):
+    w, h = img.size
+    k = width / w
+    return img.resize((width, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
 
 
 class ModelFrame(Frame):
@@ -510,7 +497,7 @@ class HyperLinkButton(ttk.Button):
         super().__init__(*args, **kwargs)
         # Use the default font.
         label_font = nametofont("TkDefaultFont").cget("family")
-        self.font = Font(family=label_font, size=9)
+        self.font = Font(family=label_font, size=12, weight='bold')
         # Label-like styling.
         self.link_style = Style()
         self.link_style.configure("Link.TLabel", foreground="#357fde", font=self.font)
@@ -589,9 +576,103 @@ class ScrollFrame(Frame):
         self.canvas.yview_moveto(0)
 
 
+class PreviewWindow(Toplevel):
+    SMALL_WIDTH = 360
+
+    def __init__(self, parent, master, cnf={}, **kw):
+        super().__init__(master, cnf={}, **kw)
+        
+        self.parent_window = parent
+        self.canvas = Canvas(self, width=200, height=100, bg="black", bd=0, highlightthickness=0)
+        self.canvas.pack(fill=BOTH, expand=True)
+        
+        self.geometry(f"+{root.winfo_screenwidth() - 854}+200")
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.bind("<Enter>", self.on_enter)
+        self.bind("<Leave>", self.on_leave)
+
+        self.main_image_loader = ThreadPoolExecutor(max_workers=1)
+        self.main_image_loader_future = None
+        self.main_image_loader_stop_event = Event()
+        self.main_image = None
+
+        self.model = None
+        self.resize = True
+
+
+    def on_close(self):
+        self.stop()
+        self.withdraw()
+        self.parent_window.menu_bar.entryconfig("Preview", state=NORMAL)
+
+    def stop(self):
+        if self.main_image_loader_future is not None and not self.main_image_loader_future.done():
+            if not self.main_image_loader_future.cancel():
+                self.main_image_loader_stop_event.set()
+
+    def load_main_image_in_thread(self):
+        self.stop()
+        self.main_image_loader_future = self.main_image_loader.submit(self.fetch_image_main)
+
+    def fetch_image_main(self):
+        global root
+
+        try:
+            while not self.main_image_loader_stop_event.is_set():
+                if self.model is None:
+                    break
+
+                img_url = HTTP_IMG_URL + self.model + f"&f={random.random()}"
+                # print(img_url)
+
+                response = image_loader_session.get(img_url, timeout=TIMEOUT)
+                if response.status_code != 200:
+                    return
+
+                img = Image.open(io.BytesIO(response.content))
+                if self.resize:
+                    img = resize_image(img, self.SMALL_WIDTH)
+                photo_image = ImageTk.PhotoImage(img)
+                root.after_idle(self.update_main_image, photo_image)
+
+                time.sleep(0.5)
+        except BaseException as error:
+            print("Exception URL: " + HTTP_IMG_URL + self.model)
+            print(error)
+            traceback.print_exc()
+        finally:
+            self.main_image_loader_stop_event.clear()
+
+    def update_main_image(self, photo_image):
+        w = photo_image.width()
+        h = photo_image.height()
+        self.geometry(f"{w}x{h}")
+        x_center = w // 2
+        y_center = h // 2
+        self.canvas.config(width=w, height=h)
+        # print(f"window = {self.winfo_geometry()} image = {w}x{h}")
+        if self.main_image is None:
+            self.main_image = self.canvas.create_image(x_center, y_center, image=photo_image)
+        else:
+            self.canvas.itemconfigure(self.main_image, image=photo_image)
+            self.canvas.coords(self.main_image, x_center, y_center)
+
+    def set_model(self, model):
+        self.model = model
+        self.title(model or '<Undefined>')
+
+    def on_enter(self, event):
+        self.resize = False
+
+    def on_leave(self, event):
+        self.resize = True
+
+
 if __name__ == "__main__":
-    root.geometry("1044x720+0+0")
+    root.geometry(f"1024x{root.winfo_screenheight()}+0+0")
     root.title("<Undefined>")
+    # root.state('zoomed')
     main_win = MainWindow()
     root.mainloop()
     driver.quit()

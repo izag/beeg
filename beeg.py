@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 PAD = 5
 MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -81,7 +81,7 @@ class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
         self._work_queue = Queue(maxsize=maxsize)
 
 
-image_loader = ThreadPoolExecutorWithQueueSizeLimit(max_workers=1)
+image_loader = ThreadPoolExecutor(max_workers=1)
 image_loader_future = None
 
 root = Tk()
@@ -173,12 +173,15 @@ class MainWindow:
         img = Image.open('assets/rec_small.png')
         self.img_record = ImageTk.PhotoImage(img)
         self.btn_start = Button(root, image=self.img_record, command=self.on_btn_start)
-        self.btn_start.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
+        self.btn_start.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
 
         img = Image.open('assets/stop_small.png')
         self.img_stop = ImageTk.PhotoImage(img)
-        self.btn_stop = Button(root, image=self.img_stop, command=self.on_btn_stop)
-        # self.btn_stop.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
+
+        img = Image.open('assets/rec1_small.png')
+        self.img_paste_record = ImageTk.PhotoImage(img)
+        self.btn_paste_record = Button(root, image=self.img_paste_record, command=lambda: self.on_paste_and_record(120))
+        self.btn_paste_record.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
@@ -238,6 +241,27 @@ class MainWindow:
             return
         
         self.on_record(0)
+
+    def on_paste_and_record(self, duration):
+        model = clipboard.paste()
+        self.cb_model.set(model)
+
+        success = self.update_base_url(True)
+        if not success:
+            return
+        
+        session = self.record_sessions.get(self.model_name, None)
+        if session is not None and session.is_alive():
+            self.process_online_model()
+            self.disable_for_update(NORMAL)
+            return
+        
+        if self.base_url is None or self.resolution is None:
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, duration))
+            return
+
+        self.start_recording(duration)
 
     def on_record(self, duration):
         session = self.record_sessions.get(self.model_name, None)
@@ -302,8 +326,8 @@ class MainWindow:
             return
 
         clipboard.copy(session.output_dir)
-        executor.submit(send_to_player, session.output_dir)
-    
+        executor.submit(send_to_player, session.output_dir) 
+
     def update_base_url(self, remember):
         if remember and (self.model_name is not None):
             if len(self.hist_stack) == 0 or (self.model_name != self.hist_stack[-1]):
@@ -382,7 +406,7 @@ class MainWindow:
         self.btn_copy.config(state=new_state)
         self.btn_paste.config(state=new_state)
         self.btn_start.config(state=new_state)
-        self.btn_stop.config(state=new_state)
+        self.btn_paste_record.config(state=new_state)
         self.btn_record_short.config(state=new_state)
         if self.hist_window is not None:
             self.hist_window.list_box.config(state=new_state)
@@ -395,6 +419,10 @@ class MainWindow:
         if (len(name) > 0) and (name not in self.cb_model['values']):
             self.cb_model['values'] = (name, *self.cb_model['values'])
             self.hist_logger.info(name)
+
+        if len(self.cb_model['values']) > 1:
+            self.btn_next.config(state=NORMAL)
+            self.btn_prev.config(state=NORMAL)
 
     def remove_from_favorites(self):
         input_url = self.cb_model.get().strip()
@@ -413,6 +441,10 @@ class MainWindow:
             self.cb_model.set(values[0])
         else:
             self.cb_model.set(values[idx - 1])
+
+        if len(values) < 2:
+            self.btn_next.config(state=DISABLED)
+            self.btn_prev.config(state=DISABLED)
 
     def add_to_proxies(self, proxy):
         if len(self.cb_proxy['values']) == 0:
@@ -590,7 +622,8 @@ class MainWindow:
             w, h = img.size
             k = 450 / w
             img_resized = img.resize((450, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
-            root.after_idle(self.update_image, img_resized)
+            self.model_image = ImageTk.PhotoImage(img_resized)
+            root.after_idle(self.update_image)
         except BaseException as error:
             print("Exception URL: " + self.img_url)
             print(error)
@@ -600,8 +633,8 @@ class MainWindow:
             self.repeat = 0
             self.img_counter = 0
 
-    def update_image(self, img):
-        self.model_image = ImageTk.PhotoImage(img)
+    def update_image(self):
+        # self.model_image = ImageTk.PhotoImage(img)
         # width, height = img.size
         # self.image_label.config(width=width, height=height)
         # x_center = width // 2
@@ -611,6 +644,12 @@ class MainWindow:
         # else:
         #     self.image_label.itemconfigure(self.bg_img, image=self.model_image)
         #     self.image_label.coords(self.bg_img, x_center, y_center)
+        session = self.record_sessions.get(self.model_name, None)
+        if session is not None and session.is_alive():
+            remains = session.get_remaining()
+            if remains > 0:
+                self.btn_record_short.config(text=f"Remains {remains}")
+
         self.image_label.config(image=self.model_image)
 
     def on_close(self):
@@ -637,7 +676,7 @@ class MainWindow:
         global root
 
         # self.session = None
-        self.btn_stop.config(state=DISABLED)
+        self.btn_paste_record.config(state=NORMAL)
         self.btn_start.config(state=NORMAL)
         self.btn_record_short.config(state=NORMAL)
         self.progress.stop()
@@ -649,34 +688,36 @@ class MainWindow:
         global root
 
         self.btn_update.configure(background='SystemButtonFace')
+        self.btn_record_short.config(text='Record short')
+
+        stats = f'({len(self.record_sessions)}/{len(self.cb_model['values'])})'
 
         if self.model_name is None:
             self.record_started = False
             self.btn_start.config(image=self.img_record, state=DISABLED)
-            root.title(f'({len(self.record_sessions)}) <Undefined>')
+            root.title(f'{stats} <Undefined>')
             return
         
-        root.title(f'({len(self.record_sessions)}) {self.model_name}')
+        root.title(f'{stats} {self.model_name}')
 
         if self.resolution is not None:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
                 edge_addr = self.edges.get(self.model_name, self.edge)
-                root.title(f'({len(self.record_sessions)}) {edge_addr} : {self.model_name} ({best_bandwidth}) ')
+                root.title(f'{stats} {edge_addr} : {self.model_name} ({best_bandwidth}) ')
 
         session = self.record_sessions.get(self.model_name, None)
 
-        self.record_started = session is not None and session.is_alive();
+        self.record_started = session is not None and session.is_alive()
         self.btn_start.config(state=NORMAL, image=self.img_stop if self.record_started else self.img_record)
 
         if not self.record_started:
             return
 
-        session.duration > 0
         root.title(root.title() + " - Recording")
         self.btn_update.configure(background='green' if session.duration > 0 else 'red')
-        self.record_started
+        
 
     def update_active_records(self, model_name):
         self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
@@ -1181,7 +1222,8 @@ class RecordSession(Thread):
         self.logger.addHandler(fh)
         self.hist_logger = rating_logger
 
-        self.record_executor = ThreadPoolExecutorWithQueueSizeLimit(max_workers=1)
+        self.record_executor = ThreadPoolExecutor(max_workers=1)
+        self.end_time = 0
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
@@ -1224,9 +1266,9 @@ class RecordSession(Thread):
         fails = 0
         last_pos = 0
         start_time = time.time()
-        end_time = start_time + self.duration;
+        self.end_time = start_time + self.duration;
 
-        while not self.stopped and (self.duration <= 0 or time.time() < end_time):
+        while not self.stopped and (self.duration <= 0 or time.time() < self.end_time):
             chunks = self.get_chunks()
             if chunks is None:
                 self.logger.info("Offline : " + self.chunks_url)
@@ -1277,6 +1319,12 @@ class RecordSession(Thread):
     def stop(self):
         self.stopped = True
 
+    def get_remaining(self):
+        if self.duration == 0:
+            return -1
+
+        return int(self.end_time - time.time())
+
 
 class PlayerWindow:
     def __init__(self, parent, win):
@@ -1284,6 +1332,8 @@ class PlayerWindow:
         self.parent_window = parent
         self.window.title("Media Player")
         self.window.geometry("800x600")
+
+        self.window.protocol("WM_DELETE_WINDOW", self.on_close)
 
         self.media_canvas = Canvas(win, bg="black", width=800, height=400)
         parent.media_player.set_hwnd(self.media_canvas.winfo_id())
