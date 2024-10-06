@@ -17,11 +17,11 @@ beeg:
 - different color for short recording
 
 viewer:
-- refresh list
 - pagination
 - categories, tags
 - more like model from input text (clipboard)
 - model search
+- change layout
 
 
 

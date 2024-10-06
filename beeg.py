@@ -44,10 +44,10 @@ HEADERS = {
 TIMEOUT = (3.05, 9.05)
 SHORT_IMG_DELAY = 2000
 LONG_IMG_DELAY = 30000
+SHORT_REC_DURATION = 120
 PAD = 5
-MAX_FAILS = 6
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -161,7 +161,7 @@ class MainWindow:
         self.btn_play.grid(row=self.level, column=3, columnspan=2, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
-        self.btn_record_short = Button(root, text="Record short", command=lambda: self.on_record(120))
+        self.btn_record_short = Button(root, text="Record short", command=lambda: self.on_record(SHORT_REC_DURATION))
         self.btn_record_short.grid(row=self.level, column=0, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_copy = Button(root, text="Copy", command=self.copy_model_name)
@@ -180,11 +180,15 @@ class MainWindow:
 
         img = Image.open('assets/rec1_small.png')
         self.img_paste_record = ImageTk.PhotoImage(img)
-        self.btn_paste_record = Button(root, image=self.img_paste_record, command=lambda: self.on_paste_and_record(120))
+        self.btn_paste_record = Button(root, image=self.img_paste_record, command=lambda: self.on_paste_and_record(SHORT_REC_DURATION))
         self.btn_paste_record.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
         self.progress = ttk.Progressbar(root, orient=HORIZONTAL, length=120, mode='indeterminate')
+        
+        self.sv_stats = StringVar()
+        self.lbl_stats = Label(root, textvariable=self.sv_stats)
+        self.lbl_stats.grid(row=self.level, column=0, columnspan=4, sticky=W + E, padx=PAD, pady=PAD)
 
         root.bind("<FocusIn>", self.focus_in_callback)
         root.bind("<FocusOut>", self.focus_out_callback)
@@ -424,6 +428,8 @@ class MainWindow:
             self.btn_next.config(state=NORMAL)
             self.btn_prev.config(state=NORMAL)
 
+        self.update_title()
+
     def remove_from_favorites(self):
         input_url = self.cb_model.get().strip()
         name = get_model_name(input_url)
@@ -445,6 +451,8 @@ class MainWindow:
         if len(values) < 2:
             self.btn_next.config(state=DISABLED)
             self.btn_prev.config(state=DISABLED)
+
+        self.update_title()
 
     def add_to_proxies(self, proxy):
         if len(self.cb_proxy['values']) == 0:
@@ -523,8 +531,6 @@ class MainWindow:
             traceback.print_exc()
 
     def get_resolutions(self, for_record):
-        global last_successful_edge
-
         if self.edge is None or for_record:
             model_edge = self.edges.get(self.model_name, None)
             if model_edge is None:
@@ -549,6 +555,14 @@ class MainWindow:
             if r.status_code == 302:
                 redirect_url = r.headers['Location']
                 r = self.http_session.get(redirect_url, timeout=TIMEOUT)
+
+            if r.status_code == 404:
+                print("get_resolutions status code 404 for model: " + self.model_name)
+                if model_edge == self.edge:
+                    del self.edges[self.model_name]
+                self.edge = None
+                return False
+
             lines = r.text.splitlines()
 
             resolutions = [line for line in lines if not line.startswith("#")]
@@ -567,6 +581,11 @@ class MainWindow:
             print("GetPlayList exception model: " + self.model_name)
             print(error)
             traceback.print_exc()
+
+            if model_edge == self.edge:
+                del self.edges[self.model_name]
+            self.edge = None
+            
             return False
         
     def get_resolutions_retry(self, for_record):
@@ -649,6 +668,11 @@ class MainWindow:
             remains = session.get_remaining()
             if remains > 0:
                 self.btn_record_short.config(text=f"Remains {remains}")
+            empty = session.get_empty()
+            missed = session.get_missed()
+            self.sv_stats.set(f"Empty: {empty}\nMissed: {missed}")
+        else:
+            self.sv_stats.set("")
 
         self.image_label.config(image=self.model_image)
 
@@ -1138,14 +1162,14 @@ class HistoryWindow:
     def on_test_next(self):
         items = self.list_box.get(self.test_online_start, self.test_online_start + HistoryWindow.MAX_QUERY_SIZE - 1)
 
-        model_list = []
-        for i, name in zip(range(self.test_online_start, self.test_online_start + len(items)), items):
-            model_list.append(Model(i, name))
+        # model_list = []
+        # for i, name in zip(range(self.test_online_start, self.test_online_start + len(items)), items):
+        #     model_list.append(Model(i, name))
 
-        self.test_online_start += HistoryWindow.MAX_QUERY_SIZE
-        self.set_controls_state(DISABLED)
+        # self.test_online_start += HistoryWindow.MAX_QUERY_SIZE
+        # self.set_controls_state(DISABLED)
 
-        executor.submit(self.test_online, model_list)
+        # executor.submit(self.test_online, model_list)
 
     def set_controls_state(self, state):
         self.btn_test.config(state=state)
@@ -1191,6 +1215,10 @@ POOL = SessionPool(1)
 
 class RecordSession(Thread):
     MIN_CHUNKS = 6
+    MAX_FAILS = 6
+    MAX_EMPTY = 5
+    SINGLE_THREAD = True
+    STAT_INTERVAL = 120
 
     def __init__(self, main_win, url_base, model, chunk_url, rating_logger, duration = 0):
         super(RecordSession, self).__init__()
@@ -1224,13 +1252,15 @@ class RecordSession(Thread):
 
         self.record_executor = ThreadPoolExecutor(max_workers=1)
         self.end_time = 0
+        self.empty_count = 0
+        self.missed = 0
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
         try:
             r = self.http_session.get(self.chunks_url, timeout=TIMEOUT)
             if r.status_code != 200:
-                self.logger.debug(f"Status {r.status_code}: {self.chunks_url}")
+                self.logger.info(f"Status {r.status_code}: {self.chunks_url}")
                 return None
 
             lines = r.text.splitlines()
@@ -1252,12 +1282,16 @@ class RecordSession(Thread):
             session = POOL.get()
             with session.get(ts_url, stream=True, timeout=TIMEOUT) as r, open(file_path, 'wb') as fd:
                 if r.status_code != 200:
-                    self.logger.debug(f"Status {r.status_code}: {remote_filename}")
+                    self.logger.info(f"Status {r.status_code}: {remote_filename}")
                     return
                 for chunk in r.iter_content(chunk_size=65536):
                     fd.write(chunk)
         except BaseException as error:
             self.logger.exception(error)
+        finally:
+            st = os.stat(file_path)
+            if st.st_size == 0:
+                self.empty_count += 1
 
     def run(self):
         global root
@@ -1265,8 +1299,9 @@ class RecordSession(Thread):
         self.logger.info(f"Started {self.model_name}!")
         fails = 0
         last_pos = 0
+        last_ts = 0
         start_time = time.time()
-        self.end_time = start_time + self.duration;
+        self.end_time = start_time + self.duration
 
         while not self.stopped and (self.duration <= 0 or time.time() < self.end_time):
             chunks = self.get_chunks()
@@ -1274,7 +1309,7 @@ class RecordSession(Thread):
                 self.logger.info("Offline : " + self.chunks_url)
                 fails += 1
 
-                if fails > MAX_FAILS:
+                if fails > RecordSession.MAX_FAILS:
                     break
 
                 time.sleep(1)
@@ -1295,8 +1330,23 @@ class RecordSession(Thread):
                         self.logger.debug("Skipped: " + ts)
                         continue
 
+                    dot_pos = ts.rfind('.')
+                    under_pos = ts[:dot_pos].rfind('_')
+                    ts_num = int(ts[under_pos + 1:dot_pos])
+                    diff = ts_num - last_ts
+                    if last_ts != 0 and diff > 1:
+                        self.missed += diff - 1
+                        for i in range(last_ts + 1, ts_num):
+                            self.logger.info(f"Missed: {i}")
+                    last_ts = ts_num
+
                     self.file_deq.append(ts)
-                    self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
+                    filename = f'{self.file_num:020}.ts'
+                    if RecordSession.SINGLE_THREAD:
+                        self.save_to_file(ts, filename)
+                    else:
+                        self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
+
                     self.file_num += 1
 
                     if (self.file_num - 2) % 30 == 0:
@@ -1304,7 +1354,11 @@ class RecordSession(Thread):
             except BaseException as e:
                 self.logger.exception(e)
 
-            time.sleep(1)
+            if time.time() - start_time > RecordSession.STAT_INTERVAL:
+                self.empty_count = 0
+                self.missed = 0
+
+            time.sleep(0.5)
 
         self.logger.info(f"Exited {self.model_name}!")
         self.record_executor.shutdown(wait=False, cancel_futures=True)
@@ -1324,6 +1378,12 @@ class RecordSession(Thread):
             return -1
 
         return int(self.end_time - time.time())
+    
+    def get_empty(self):
+        return self.empty_count
+
+    def get_missed(self):
+        return self.missed
 
 
 class PlayerWindow:

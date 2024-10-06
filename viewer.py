@@ -2,7 +2,7 @@ import io
 import json
 import random
 import time
-from tkinter import Menu, Toplevel, ttk
+from tkinter import TOP, Entry, Menu, StringVar, Toplevel, ttk
 from tkinter.ttk import Style
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -95,28 +95,44 @@ class MainWindow:
         self.btn_back = Button(frm_top, text="Back", command=self.go_back)
         self.btn_back.grid(row=0, column=0, sticky=EW)
 
-        self.btn_reload = Button(frm_top, text="Home", command=self.show_page_in_thread)
-        self.btn_reload.grid(row=0, column=1, sticky=EW)
+        self.btn_home = Button(frm_top, text="Home", command=self.show_home_page)
+        self.btn_home.grid(row=0, column=1, sticky=EW)
 
-        self.btn_couples = Button(frm_top, text="Couples", command=lambda: self.show_page_in_thread('c'))
+        self.btn_couples = Button(frm_top, text="Couples", command=lambda: self.show_home_page('c'))
         self.btn_couples.grid(row=0, column=2, sticky=EW)
 
-        self.btn_trans = Button(frm_top, text="Trans", command=lambda: self.show_page_in_thread('t'))
+        self.btn_trans = Button(frm_top, text="Trans", command=lambda: self.show_home_page('t'))
         self.btn_trans.grid(row=0, column=3, sticky=EW)
 
         self.btn_refresh = Button(frm_top, text="Refresh", command=self.refresh_in_thread)
         self.btn_refresh.grid(row=0, column=4, sticky=EW)
+
+        self.sv_model = StringVar()
+        self.entry_model = Entry(frm_top, textvariable=self.sv_model, width=40)
+        self.entry_model.bind('<Return>', self.load_more_like)
+        self.entry_model.grid(row=0, column=5, sticky=EW)
+
+        self.btn_load = Button(frm_top, text="Load", command=self.load_more_like)
+        self.btn_load.grid(row=0, column=6, sticky=EW)
+
+        self.btn_prev = Button(frm_top, text="Prev", command=self.show_prev_page)
+        self.btn_prev.grid(row=0, column=7, sticky=EW)
+
+        self.btn_next = Button(frm_top, text="Next", command=self.show_next_page)
+        self.btn_next.grid(row=0, column=8, sticky=EW)
 
         self.frm_main = ScrollFrame(root)
         self.image_buttons = self.fill_panel(self.frm_main.view_port)
 
         # self.canvas = Canvas(root, width=200, height=100, bg="black", bd=0, highlightthickness=0)
 
-        frm_top.pack(fill=X)
+        frm_top.pack(side=TOP, fill=X)
         # self.canvas.pack(pady=10)
         self.frm_main.pack(fill=BOTH, expand=True)
 
         self.hist_stack = []
+        self.page = 0
+        self.gender = None
 
         self.loading_task = None
         self.stop_event = Event()
@@ -128,28 +144,50 @@ class MainWindow:
         self.preview_window = PreviewWindow(self, root)
         self.preview_window.withdraw()
 
-    def show_page_in_thread(self, gender=None):
+    def show_next_page(self):
+        self.page += 1
+        self.show_page_in_thread()
+
+    def show_prev_page(self):
+        if self.page > 0:
+            self.page -= 1
+
+        self.show_page_in_thread()
+
+    def show_home_page(self, gender=None):
+        self.page = 0
+        self.gender = gender
+        self.show_page_in_thread()
+
+    def show_page_in_thread(self):
         global root
 
         if self.loading_task is not None and not self.loading_task.done():
             if not self.loading_task.cancel():
                 self.stop_event.set()
 
-        root.title('<Undefined>')
+        root.title(f'Gender {self.gender} Page {self.page}')
         self.set_controls_state(DISABLED)
         self.frm_main.scroll_top_left()
         for btn in self.image_buttons:
             btn.reset()
         
-        self.loading_task = executor.submit(self.show_page, gender)
+        self.loading_task = executor.submit(self.show_page, self.gender, self.page)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
-    def show_page(self, gender):
-        result = get_all(gender)
-        models = [(model['username'], model['img']) for model in result['rooms']]
+    def show_page(self, gender, page):
+        result = get_all(gender, page)
+        models = [(model['username'], model['img'], f"{model['country']} {model['location']}") for model in result['rooms']]
         self.reconfigure_buttons(models)
 
-    def show_page_more_like_in_thread(self, model, remember):
+    def load_more_like(self):
+        model = self.sv_model.get().strip()
+        if len(model) == 0:
+            return
+
+        self.show_page_more_like_in_thread(model, None, True)
+
+    def show_page_more_like_in_thread(self, model, location, remember):
         global root
 
         if self.loading_task is not None and not self.loading_task.done():
@@ -169,11 +207,11 @@ class MainWindow:
         self.loading_task = executor.submit(self.show_page_more_like, model)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
-        self.load_main_image_in_thread(model)
+        self.load_main_image_in_thread(model, location)
 
     def show_page_more_like(self, model):
         result = get_more_like(model)
-        models = [(model['room'], model['img']) for model in result['rooms']]
+        models = [(model['room'], model['img'], f"{model['country']} {model['location']}") for model in result['rooms']]
         self.reconfigure_buttons(models)
 
     def refresh_in_thread(self):
@@ -189,8 +227,13 @@ class MainWindow:
 
     def set_controls_state(self, status):
         self.btn_back.config(state=status)
-        self.btn_reload.config(state=status)
+        self.btn_home.config(state=status)
+        self.btn_couples.config(state=status)
+        self.btn_trans.config(state=status)
         self.btn_refresh.config(state=status)
+        self.btn_load.config(state=status)
+        self.btn_next.config(state=status)
+        self.btn_prev.config(state=status)
 
         # for btn in self.image_buttons:
         #     btn.config(state=status)
@@ -208,8 +251,8 @@ class MainWindow:
                 if i >= len(models):
                     break
 
-                username, img_url = models[i]
-                self.reconfigure_button(http_session, cell, username, img_url)
+                username, img_url, location = models[i]
+                self.reconfigure_button(http_session, cell, username, img_url, location)
                 i += 1
         except BaseException as error:
             print(error)
@@ -229,7 +272,7 @@ class MainWindow:
                     break
 
                 button = cell.img_button
-                self.reconfigure_button(http_session, cell, button.link, button.img_url)
+                self.reconfigure_button(http_session, cell, button.link, button.img_url, button.location)
         except BaseException as error:
             print(error)
             traceback.print_exc()
@@ -268,7 +311,7 @@ class MainWindow:
     #     finally:
     #         http_session.close()
 
-    def reconfigure_button(self, http_session, cell, url, img_url):
+    def reconfigure_button(self, http_session, cell, url, img_url, location):
         global root
 
         if (img_url is None) or (len(img_url) == 0):
@@ -286,7 +329,7 @@ class MainWindow:
         if photo_image is None:
             return
 
-        root.after_idle(cell.set_values, url, photo_image, img_url)
+        root.after_idle(cell.set_values, url, photo_image, img_url, location)
 
     def go_back(self):
         if len(self.hist_stack) == 0:
@@ -298,7 +341,7 @@ class MainWindow:
             self.go_back()
             return
         
-        self.show_page_more_like_in_thread(model, False)
+        self.show_page_more_like_in_thread(model, None, False)
 
     def fill_panel(self, panel):
         buttons = []
@@ -359,10 +402,10 @@ class MainWindow:
         finally:
             self.image_loader_stop_event.clear()
 
-    def load_main_image_in_thread(self, model):
-        self.menu_bar.entryconfig("Preview", state=DISABLED)
+    def load_main_image_in_thread(self, model, location):
+        # self.menu_bar.entryconfig("Preview", state=DISABLED)
         self.preview_window.deiconify()
-        self.preview_window.set_model(model)
+        self.preview_window.set_values(model, location)
         self.preview_window.load_main_image_in_thread()
 
     def focus_in_callback(self, event):
@@ -399,8 +442,8 @@ class MainWindow:
 #         traceback.print_exc()
 
 
-def get_all(gender=None):
-    src = f'view-source:https://chaturbate.com/api/ts/roomlist/room-list/?limit={ROWS * COLS}&offset=0'
+def get_all(gender, page):
+    src = f'view-source:https://chaturbate.com/api/ts/roomlist/room-list/?limit={ROWS * COLS}&offset={page * ROWS * COLS}'
 
     if gender is not None:
         src += f'&genders={gender}'
@@ -452,10 +495,10 @@ class ModelFrame(Frame):
         self.name.config(text=None, command=None)
         self.model = None
 
-    def set_values(self, url, img, img_url):
-        self.img_button.set_values(url, img, img_url)
-        self.model = url
-        self.name.config(text=url, command=lambda: self.main_win.show_page_more_like_in_thread(url, True))
+    def set_values(self, model, img, img_url, location):
+        self.img_button.set_values(model, img, img_url, location)
+        self.model = model
+        self.name.config(text=model[:15], command=lambda: self.main_win.show_page_more_like_in_thread(model, location, True))
 
 
 class LinkButton(Button):
@@ -467,6 +510,7 @@ class LinkButton(Button):
         self.link = None
         self.image = None
         self.img_url = None
+        self.location = None
         self.main_win = win
         # self.tip = Hovertip(self, text=None, hover_delay=100)
 
@@ -478,13 +522,15 @@ class LinkButton(Button):
         self.link = None
         self.img_url = None
         self.image = None
+        self.location = None
         # self.tip.text = None
 
-    def set_values(self, url, img, img_url):
-        self.config(image=img, command=lambda: self.main_win.load_main_image_in_thread(url))
+    def set_values(self, url, img, img_url, location):
+        self.config(image=img, command=lambda: self.main_win.load_main_image_in_thread(url, location))
         self.image = img
         self.img_url = img_url
         self.link = url
+        self.location = location
         # self.tip.text = url
 
     def set_image(self, img):
@@ -584,9 +630,13 @@ class PreviewWindow(Toplevel):
         
         self.parent_window = parent
         self.canvas = Canvas(self, width=200, height=100, bg="black", bd=0, highlightthickness=0)
-        self.canvas.pack(fill=BOTH, expand=True)
+        self.canvas.pack(fill=BOTH)
+
+        self.sv_stats = StringVar()
+        self.lbl_stats = Label(self, textvariable=self.sv_stats)
+        self.lbl_stats.pack(pady=10)
         
-        self.geometry(f"+{root.winfo_screenwidth() - 854}+200")
+        self.geometry(f"+{root.winfo_screenwidth() - 854}+0")
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Enter>", self.on_enter)
@@ -604,7 +654,7 @@ class PreviewWindow(Toplevel):
     def on_close(self):
         self.stop()
         self.withdraw()
-        self.parent_window.menu_bar.entryconfig("Preview", state=NORMAL)
+        # self.parent_window.menu_bar.entryconfig("Preview", state=NORMAL)
 
     def stop(self):
         if self.main_image_loader_future is not None and not self.main_image_loader_future.done():
@@ -631,8 +681,8 @@ class PreviewWindow(Toplevel):
                     return
 
                 img = Image.open(io.BytesIO(response.content))
-                if self.resize:
-                    img = resize_image(img, self.SMALL_WIDTH)
+                # if self.resize:
+                #     img = resize_image(img, PreviewWindow.SMALL_WIDTH)
                 photo_image = ImageTk.PhotoImage(img)
                 root.after_idle(self.update_main_image, photo_image)
 
@@ -647,7 +697,7 @@ class PreviewWindow(Toplevel):
     def update_main_image(self, photo_image):
         w = photo_image.width()
         h = photo_image.height()
-        self.geometry(f"{w}x{h}")
+        # self.geometry(f"{w}x{h}")
         x_center = w // 2
         y_center = h // 2
         self.canvas.config(width=w, height=h)
@@ -658,9 +708,10 @@ class PreviewWindow(Toplevel):
             self.canvas.itemconfigure(self.main_image, image=photo_image)
             self.canvas.coords(self.main_image, x_center, y_center)
 
-    def set_model(self, model):
+    def set_values(self, model, location):
         self.model = model
         self.title(model or '<Undefined>')
+        self.sv_stats.set(location)
 
     def on_enter(self, event):
         self.resize = False
@@ -670,7 +721,7 @@ class PreviewWindow(Toplevel):
 
 
 if __name__ == "__main__":
-    root.geometry(f"1024x{root.winfo_screenheight()}+0+0")
+    root.geometry(f"760x{root.winfo_screenheight()}+-7+0")
     root.title("<Undefined>")
     # root.state('zoomed')
     main_win = MainWindow()

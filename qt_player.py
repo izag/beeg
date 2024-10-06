@@ -25,11 +25,18 @@ class StreamProviderDir(object):
 
     def update_file_list(self):
         print("read file list")
-        NFILES = 10
+        NFILES = 3
         files = []
-        for entry in os.listdir(self._rootpath):
-            if os.path.splitext(entry)[1] == f".{self._file_ext}":
-                files.append(os.path.join(self._rootpath, entry))
+        try_count = 10
+        while try_count > 0 and len(files) == 0:
+            for entry in os.listdir(self._rootpath):
+                if os.path.splitext(entry)[1] == f".{self._file_ext}":
+                    files.append(os.path.join(self._rootpath, entry))
+            try_count -= 1
+
+        if len(files) == 0:
+            return
+
         files.sort()
 
         # first run
@@ -100,7 +107,7 @@ class StreamProviderDir(object):
 
         if self._pos < len(self._data):
             # print(f"pos={self._pos} len={len(self._data)}")
-            remains = len(self._data) - self._pos;
+            remains = len(self._data) - self._pos
             # print(f"remains={remains} length={length}")
             len_to_read = min(length, remains)
             # print(f"len_to_read={len_to_read} interval=[{self._pos}, {self._pos + len_to_read}]")
