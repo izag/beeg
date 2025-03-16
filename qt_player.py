@@ -48,7 +48,7 @@ class StreamProviderDir(object):
             
             wait_download(files[-1])
 
-        self._media_files = files[self._start_file_count:]
+        self._media_files = [files[0]] + files[self._start_file_count:]
 
         # print("playlist:")
         # for index, media_file in enumerate(self._media_files):

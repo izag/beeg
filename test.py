@@ -1,8 +1,12 @@
 import asyncio
 import json
 import random
+import signal
+from subprocess import TimeoutExpired
 import time
 import traceback
+from urllib.parse import urljoin
+import ffmpeg
 from tkinter import CENTER, N, Tk, Canvas, HIDDEN, NORMAL, Listbox
 from tkinter.ttk import Label
 
@@ -458,6 +462,70 @@ def test_selenium_firefox():
 
     # driver.quit()
 
+def get_resolutions(playlist_url):
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:93.0) Gecko/20100101 Firefox/93.0',
+        'Referer': 'https://jpeg.live.mmcdn.com'
+    }
+
+    try:
+        http_session = requests.Session()
+        http_session.adapters['https://'].max_retries = Retry.DEFAULT
+        http_session.headers.update(headers)
+        r = http_session.get(playlist_url, timeout=(3.05, 9.05))
+        if r.status_code == 302:
+            redirect_url = r.headers['Location']
+            r = http_session.get(redirect_url, timeout=(3.05, 9.05))
+
+        if r.status_code == 404:
+            print("get_resolutions status code 404 for model: ")
+            return None
+
+        lines = r.text.splitlines()
+
+        resolutions = [line for line in lines if not line.startswith("#")]
+        resolutions.reverse()
+
+        if len(resolutions) == 0:
+            return None
+
+        best = resolutions[0]
+
+        actual_url = r.url
+        slash_pos = actual_url.rfind('/')
+        base_url = actual_url[: slash_pos + 1]
+        return urljoin(base_url, best)
+    except requests.RequestException as error:
+        print("GetPlayList exception model: ")
+        print(error)
+        traceback.print_exc()
+        return None
+
+def test_ffmpeg():
+    playlist = "https://edge7-rtm.live.mmcdn.com/live-c-fhls/amlst:brave_journey-sd-91185ea2ce363f5cea9ac74640e9ad8f520bd79266ab4a94d04c0c21371b7631_trns_h264/playlist_sfm4s.m3u8"
+    chunk_url_video = get_resolutions(playlist)
+    if chunk_url_video is None:
+        return
+    
+    chunk_url_audio = chunk_url_video.replace('_vo_', '_ao_')
+    video = ffmpeg.input(chunk_url_video, format='hls')
+    audio = ffmpeg.input(chunk_url_audio, format='hls')
+    process = (
+        ffmpeg.output(video, audio, "output.mp4", c='copy', movflags='faststart', format='mp4').run_async(overwrite_output=True)
+    )
+
+    try:
+        process.wait(timeout=10)
+    except TimeoutExpired as ex:
+        pass
+
+    process.send_signal(signal.CTRL_C_EVENT)
+
+    try:
+        process.wait(timeout=60)
+    except TimeoutExpired as ex:
+        process.kill()
+
 
 if __name__ == "__main__":
     # root = tk.Tk()
@@ -469,4 +537,5 @@ if __name__ == "__main__":
     # test_request_all_chaturbat_net_ru()
     # test_request_chaturbate_ajax()
     # test_tor()
-    test_selenium_firefox()
+    # test_selenium_firefox()
+    test_ffmpeg()

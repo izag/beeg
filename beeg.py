@@ -5,7 +5,9 @@ import logging
 import os
 import random
 import re
+import signal
 import socket
+from subprocess import TimeoutExpired
 import sys
 import time
 import traceback
@@ -21,6 +23,7 @@ from urllib.parse import urljoin
 import aiohttp
 import clipboard
 import cloudscraper
+import ffmpeg
 import requests
 import vlc
 from PIL import Image, ImageTk
@@ -44,6 +47,7 @@ HEADERS = {
 TIMEOUT = (3.05, 9.05)
 SHORT_IMG_DELAY = 2000
 LONG_IMG_DELAY = 30000
+PREVIEW_REC_DURATION = 30
 SHORT_REC_DURATION = 120
 PAD = 5
 N_REPEAT = 3
@@ -180,7 +184,7 @@ class MainWindow:
 
         img = Image.open('assets/rec1_small.png')
         self.img_paste_record = ImageTk.PhotoImage(img)
-        self.btn_paste_record = Button(root, image=self.img_paste_record, command=lambda: self.on_paste_and_record(SHORT_REC_DURATION))
+        self.btn_paste_record = Button(root, image=self.img_paste_record, command=lambda: self.on_paste_and_record(PREVIEW_REC_DURATION))
         self.btn_paste_record.grid(row=self.level, column=4, sticky=W + E, padx=PAD, pady=PAD)
 
         self.level += 1
@@ -322,7 +326,7 @@ class MainWindow:
         self.load_model(clipboard.paste(), True)
 
     def copy_model_link(self):
-        clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
+        clipboard.copy(urljoin(self.base_url, 'playlist_sfm4s.m3u8'))
 
     def play_recording(self):
         session = self.record_sessions.get(self.model_name, None)
@@ -531,8 +535,8 @@ class MainWindow:
             traceback.print_exc()
 
     def get_resolutions(self, for_record):
+        model_edge = self.edges.get(self.model_name, None)
         if self.edge is None or for_record:
-            model_edge = self.edges.get(self.model_name, None)
             if model_edge is None:
                 playlist_url = self.get_hls_source()
                 if playlist_url is None or len(playlist_url) < 1:
@@ -543,11 +547,13 @@ class MainWindow:
                     self.edge = found.group(1)
                     if for_record:
                         self.edges[self.model_name] = found.group(1)
+
+                playlist_url = playlist_url.replace("playlist.m3u8", "playlist_sfm4s.m3u8").replace("live-hls", "live-c-fhls")
             else:
-                playlist_url = f"https://{model_edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
+                playlist_url = f"https://{model_edge}/live-c-fhls/amlst:{self.model_name}/playlist_sfm4s.m3u8"
                 self.edge = model_edge
         else:
-            playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
+            playlist_url = f"https://{self.edge}/live-c-fhls/amlst:{self.model_name}/playlist_sfm4s.m3u8"
 
         try:
             self.http_session.headers.update(HEADERS)
@@ -590,6 +596,10 @@ class MainWindow:
         
     def get_resolutions_retry(self, for_record):
         success = self.get_resolutions(for_record)
+        if not success:
+            success = self.get_resolutions(for_record)
+        if not success:
+            success = self.get_resolutions(for_record)
         if not success:
             success = self.get_resolutions(for_record)
 
@@ -714,7 +724,12 @@ class MainWindow:
         self.btn_update.configure(background='SystemButtonFace')
         self.btn_record_short.config(text='Record short')
 
-        stats = f'({len(self.record_sessions)}/{len(self.cb_model['values'])})'
+        infinite = 0
+        for m, s in self.record_sessions.items():
+            if s.is_alive() and s.get_remaining() == -1:
+                infinite += 1
+
+        stats = f'({infinite}/{len(self.record_sessions)}/{len(self.cb_model['values'])})'
 
         if self.model_name is None:
             self.record_started = False
@@ -1186,11 +1201,25 @@ class HistoryWindow:
 
 
 class Chunks:
-    IDX_CUR_POS = 3
+    IDX_CUR_POS = 5
+    IDX_HEADER = 6
 
     def __init__(self, lines):
-        self.ts = [line for line in lines if not line.startswith("#")]
+        # self.ts = [line for line in lines if not line.startswith("#")]
+        self.ts = []
+        #EXT-X-MAP
         self.cur_pos = int(lines[Chunks.IDX_CUR_POS].split(':')[1])
+
+        self.header = None
+        for line in lines:
+            if line.startswith("#EXT-X-MAP"):
+                found = re.search(r"URI=\"(.*?)\"", line, re.DOTALL)
+                if (found is not None) and (found.group(0) is not None):
+                    self.header = found.group(1)
+                continue
+            if line.startswith("#"):
+                continue
+            self.ts.append(line)
 
 
 class SessionPool:
@@ -1232,7 +1261,8 @@ class RecordSession(Thread):
         self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time() * 1000000)))
         os.mkdir(self.output_dir)
 
-        self.chunks_url = urljoin(self.base_url, chunk_url)
+        self.chunks_url_video = urljoin(self.base_url, chunk_url)
+        self.chunks_url_audio = self.chunks_url_video.replace('_vo_', '_ao_')
         self.name = 'RecordSession'
         self.stopped = False
         self.daemon = True
@@ -1254,6 +1284,8 @@ class RecordSession(Thread):
         self.end_time = 0
         self.empty_count = 0
         self.missed = 0
+        self.header_loaded = False
+        self.process = None
 
     def get_chunks(self):
         self.logger.debug(self.chunks_url)
@@ -1293,85 +1325,113 @@ class RecordSession(Thread):
             if st.st_size == 0:
                 self.empty_count += 1
 
+    # def run(self):
+    #     global root
+
+    #     self.logger.info(f"Started {self.model_name}!")
+    #     fails = 0
+    #     last_pos = 0
+    #     last_ts = 0
+    #     start_time = time.time()
+    #     self.end_time = start_time + self.duration
+
+    #     while not self.stopped and (self.duration <= 0 or time.time() < self.end_time):
+    #         chunks = self.get_chunks()
+    #         if chunks is None:
+    #             self.logger.info("Offline : " + self.chunks_url)
+    #             fails += 1
+
+    #             if fails > RecordSession.MAX_FAILS:
+    #                 break
+
+    #             time.sleep(1)
+    #             continue
+    #         else:
+    #             fails = 0
+
+    #         if last_pos >= chunks.cur_pos:
+    #             time.sleep(1)
+    #             continue
+
+    #         last_pos = chunks.cur_pos
+    #         self.logger.debug(last_pos)
+
+    #         try:
+    #             if not self.header_loaded:
+    #                 filename = f'{0:020}.ts'
+    #                 if RecordSession.SINGLE_THREAD:
+    #                     self.save_to_file(chunks.header, filename)
+    #                 else:
+    #                     self.record_executor.submit(self.save_to_file, chunks.header, filename)
+    #                 self.header_loaded = True
+    #             for ts in chunks.ts:
+    #                 if ts in self.file_deq:
+    #                     self.logger.debug("Skipped: " + ts)
+    #                     continue
+
+    #                 # dot_pos = ts.rfind('.')
+    #                 # under_pos = ts[:dot_pos].rfind('_')
+    #                 # ts_num = int(ts[under_pos + 1:dot_pos])
+    #                 # diff = ts_num - last_ts
+    #                 # if last_ts != 0 and diff > 1:
+    #                 #     self.missed += diff - 1
+    #                 #     for i in range(last_ts + 1, ts_num):
+    #                 #         self.logger.info(f"Missed: {i}")
+    #                 # last_ts = ts_num
+
+    #                 self.file_deq.append(ts)
+    #                 filename = f'{self.file_num:020}.ts'
+    #                 if RecordSession.SINGLE_THREAD:
+    #                     self.save_to_file(ts, filename)
+    #                 else:
+    #                     self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
+
+    #                 self.file_num += 1
+
+    #                 if (self.file_num - 2) % 30 == 0:
+    #                     self.hist_logger.info(self.model_name)
+    #         except BaseException as e:
+    #             self.logger.exception(e)
+
+    #         if time.time() - start_time > RecordSession.STAT_INTERVAL:
+    #             self.empty_count = 0
+    #             self.missed = 0
+
+    #         time.sleep(0.5)
+
+    #     self.logger.info(f"Exited {self.model_name}!")
+    #     self.record_executor.shutdown(wait=False, cancel_futures=True)
+    #     handlers = self.logger.handlers[:]
+    #     for handler in handlers:
+    #         self.logger.removeHandler(handler)
+    #         handler.close()
+    #     self.http_session.close()
+    #     if not self.stopped:
+    #         root.after(1000, self.main_win.update_active_records, self.model_name)
+
     def run(self):
-        global root
+        video = ffmpeg.input(self.chunks_url_video, format='hls')
+        audio = ffmpeg.input(self.chunks_url_audio, format='hls')
+        output = self.model_name + '_' + str(int(time.time() * 1000000)) + ".mp4"
+        self.process = (
+            ffmpeg.output(video, audio, output, c='copy', movflags='faststart', format='mp4').run_async(overwrite_output=True)
+        )
+        self.process.wait()
 
-        self.logger.info(f"Started {self.model_name}!")
-        fails = 0
-        last_pos = 0
-        last_ts = 0
-        start_time = time.time()
-        self.end_time = start_time + self.duration
 
-        while not self.stopped and (self.duration <= 0 or time.time() < self.end_time):
-            chunks = self.get_chunks()
-            if chunks is None:
-                self.logger.info("Offline : " + self.chunks_url)
-                fails += 1
-
-                if fails > RecordSession.MAX_FAILS:
-                    break
-
-                time.sleep(1)
-                continue
-            else:
-                fails = 0
-
-            if last_pos >= chunks.cur_pos:
-                time.sleep(1)
-                continue
-
-            last_pos = chunks.cur_pos
-            self.logger.debug(last_pos)
-
-            try:
-                for ts in chunks.ts:
-                    if ts in self.file_deq:
-                        self.logger.debug("Skipped: " + ts)
-                        continue
-
-                    dot_pos = ts.rfind('.')
-                    under_pos = ts[:dot_pos].rfind('_')
-                    ts_num = int(ts[under_pos + 1:dot_pos])
-                    diff = ts_num - last_ts
-                    if last_ts != 0 and diff > 1:
-                        self.missed += diff - 1
-                        for i in range(last_ts + 1, ts_num):
-                            self.logger.info(f"Missed: {i}")
-                    last_ts = ts_num
-
-                    self.file_deq.append(ts)
-                    filename = f'{self.file_num:020}.ts'
-                    if RecordSession.SINGLE_THREAD:
-                        self.save_to_file(ts, filename)
-                    else:
-                        self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
-
-                    self.file_num += 1
-
-                    if (self.file_num - 2) % 30 == 0:
-                        self.hist_logger.info(self.model_name)
-            except BaseException as e:
-                self.logger.exception(e)
-
-            if time.time() - start_time > RecordSession.STAT_INTERVAL:
-                self.empty_count = 0
-                self.missed = 0
-
-            time.sleep(0.5)
-
-        self.logger.info(f"Exited {self.model_name}!")
-        self.record_executor.shutdown(wait=False, cancel_futures=True)
-        handlers = self.logger.handlers[:]
-        for handler in handlers:
-            self.logger.removeHandler(handler)
-            handler.close()
-        self.http_session.close()
-        if not self.stopped:
-            root.after(1000, self.main_win.update_active_records, self.model_name)
+    # def stop(self):
+    #     self.stopped = True
 
     def stop(self):
-        self.stopped = True
+        if self.process is None:
+            return
+        
+        self.process.send_signal(signal.CTRL_C_EVENT)
+
+        # try:
+        #     self.process.wait(timeout=60)
+        # except TimeoutExpired as ex:
+        #     self.process.kill()
 
     def get_remaining(self):
         if self.duration == 0:
