@@ -22,6 +22,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options
 from threading import Event
+from tbselenium.tbdriver import TorBrowserDriver
 
 
 random.seed()
@@ -68,11 +69,13 @@ class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
 executor = ThreadPoolExecutor(max_workers=5)
 root = Tk()
 
-firefox_profile = webdriver.FirefoxProfile('C:\\Users\\Gregory\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\zlk8ndod.default-release\\')
-firefox_profile.set_preference('browser.privatebrowsing.autostart', True)
-options = Options()
-options.profile = firefox_profile
-driver = webdriver.Firefox(options=options)
+# firefox_profile = webdriver.FirefoxProfile('C:\\Users\\Gregory\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\zlk8ndod.default-release\\')
+# firefox_profile.set_preference('browser.privatebrowsing.autostart', True)
+# options = Options()
+# options.profile = firefox_profile
+# driver = webdriver.Firefox(options=options)
+
+driver = TorBrowserDriver(tbb_fx_binary_path="C:\\Users\\Gregory\\Desktop\\TorBrowser\\Browser\\firefox.exe", tbb_profile_path="C:\\Users\\Gregory\\Desktop\\TorBrowser\\Browser\\TorBrowser\\Data\\Browser\\profile.default\\")
 
 image_loader_session = requests.Session()
 image_loader_session.headers.update(STREAM_HEADERS)
@@ -319,15 +322,11 @@ class MainWindow:
 
         image = download_image(http_session, img_url.replace('/ri/', '/riw/'))
 
-        if (image is None) or (len(image) == 0):
-            root.after_idle(cell.reset)
-            return
-
-        img = Image.open(io.BytesIO(image))
-        img_resized = resize_image(img, IMG_WIDTH)
-        photo_image = ImageTk.PhotoImage(img_resized)
-        if photo_image is None:
-            return
+        photo_image = None
+        if (image is not None) and (len(image) != 0):
+            img = Image.open(io.BytesIO(image))
+            img_resized = resize_image(img, IMG_WIDTH)
+            photo_image = ImageTk.PhotoImage(img_resized)
 
         root.after_idle(cell.set_values, url, photo_image, img_url, location)
 
@@ -357,24 +356,24 @@ class MainWindow:
         if event.widget.link is None:
             return
         
-        print(f"entered {event.widget.link}")
+        # print(f"entered {event.widget.link}")
         
         if self.image_loader_future is not None and not self.image_loader_future.done():
             if not self.image_loader_future.cancel():
                 self.image_loader_stop_event.set()
 
         self.image_loader_future = self.image_loader.submit(self.fetch_image, event.widget)
-        print(f"submited {event.widget.link}")
+        # print(f"submited {event.widget.link}")
         # self.image_loader_future.add_done_callback(lambda f: event.widgetself.set_controls_state(NORMAL))
 
     def on_leave(self, event):
         if self.image_loader_future is not None and not self.image_loader_future.done():
-            print(f"leaved {event.widget.link}")
+            # print(f"leaved {event.widget.link}")
             if not self.image_loader_future.cancel():
                 self.image_loader_stop_event.set()
-                print(f"set {event.widget.link}")
-            else:
-                print(f"canceled {event.widget.link}")
+                # print(f"set {event.widget.link}")
+            # else:
+            #     print(f"canceled {event.widget.link}")
 
     def fetch_image(self, button):
         global root
@@ -464,8 +463,15 @@ def get_more_like(model):
 
 
 def download_image(http_session, url):
-    response = http_session.get(url, timeout=TIMEOUT)
+    qpos = url.rfind('?')
+    if qpos > 0:
+        url = url[:qpos]
+    response = http_session.get(url, timeout=TIMEOUT, allow_redirects=False)
     if response.status_code == 404:
+        return None
+    
+    if response.status_code != 200:
+        print(url)
         return None
 
     return response.content
