@@ -47,7 +47,7 @@ LONG_IMG_DELAY = 30000
 SHORT_REC_DURATION = 120
 PAD = 5
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp3")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -236,6 +236,7 @@ class MainWindow:
         # edge for browsing 
         self.edge = None
         self.edges = {}
+        self.suffix = None
 
     def on_btn_start(self):
         if self.record_started:
@@ -531,23 +532,24 @@ class MainWindow:
             traceback.print_exc()
 
     def get_resolutions(self, for_record):
-        if self.edge is None or for_record:
-            model_edge = self.edges.get(self.model_name, None)
-            if model_edge is None:
-                playlist_url = self.get_hls_source()
-                if playlist_url is None or len(playlist_url) < 1:
-                    return False
+        model_edge = self.edges.get(self.model_name, None)
+        # if self.edge is None or for_record:
+        if model_edge is None:
+            playlist_url = self.get_hls_source()
+            if playlist_url is None or len(playlist_url) < 1:
+                return False
 
-                found = re.search(r"https://(.*?)/", playlist_url, re.DOTALL)
-                if (found is not None) and (found.group(0) is not None):
-                    self.edge = found.group(1)
-                    if for_record:
-                        self.edges[self.model_name] = found.group(1)
-            else:
-                playlist_url = f"https://{model_edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
-                self.edge = model_edge
+            found = re.search(r"https://(.*?)/live-hls/amlst:(.*?)-sd-(.*?)/playlist.m3u8", playlist_url, re.DOTALL)
+            if (found is not None) and (found.group(0) is not None):
+                self.edge = found.group(1)
+                if for_record:
+                    self.edges[self.model_name] = found.group(1)
+                    self.suffix = found.group(3)
         else:
-            playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}/playlist.m3u8"
+            playlist_url = f"https://{model_edge}/live-hls/amlst:{self.model_name}-sd-{self.suffix}/playlist.m3u8"
+            self.edge = model_edge
+        # else:
+        #     playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}-sd-{self.suffix}/playlist.m3u8"
 
         try:
             self.http_session.headers.update(HEADERS)
@@ -590,6 +592,10 @@ class MainWindow:
         
     def get_resolutions_retry(self, for_record):
         success = self.get_resolutions(for_record)
+        if not success:
+            success = self.get_resolutions(for_record)
+        if not success:
+            success = self.get_resolutions(for_record)
         if not success:
             success = self.get_resolutions(for_record)
 
@@ -714,7 +720,12 @@ class MainWindow:
         self.btn_update.configure(background='SystemButtonFace')
         self.btn_record_short.config(text='Record short')
 
-        stats = f'({len(self.record_sessions)}/{len(self.cb_model['values'])})'
+        infinite = 0
+        for m, s in self.record_sessions.items():
+            if s.is_alive() and s.get_remaining() == -1:
+                infinite += 1
+
+        stats = f'({len(self.record_sessions)}/{infinite}/{len(self.cb_model['values'])})'
 
         if self.model_name is None:
             self.record_started = False
@@ -1219,6 +1230,7 @@ class RecordSession(Thread):
     MAX_EMPTY = 5
     SINGLE_THREAD = True
     STAT_INTERVAL = 120
+    MAX_SIZE = 500_000_000
 
     def __init__(self, main_win, url_base, model, chunk_url, rating_logger, duration = 0):
         super(RecordSession, self).__init__()
@@ -1278,20 +1290,24 @@ class RecordSession(Thread):
         file_path = os.path.join(self.output_dir, local_filename)
 
         ts_url = urljoin(self.base_url, remote_filename)
+        chunk_size = 0
         try:
             session = POOL.get()
             with session.get(ts_url, stream=True, timeout=TIMEOUT) as r, open(file_path, 'wb') as fd:
                 if r.status_code != 200:
                     self.logger.info(f"Status {r.status_code}: {remote_filename}")
-                    return
+                    return 0
+                
                 for chunk in r.iter_content(chunk_size=65536):
-                    fd.write(chunk)
+                    chunk_size += fd.write(chunk)
         except BaseException as error:
             self.logger.exception(error)
         finally:
             st = os.stat(file_path)
             if st.st_size == 0:
                 self.empty_count += 1
+
+        return chunk_size
 
     def run(self):
         global root
@@ -1302,6 +1318,7 @@ class RecordSession(Thread):
         last_ts = 0
         start_time = time.time()
         self.end_time = start_time + self.duration
+        downloaded_bytes = 0
 
         while not self.stopped and (self.duration <= 0 or time.time() < self.end_time):
             chunks = self.get_chunks()
@@ -1343,7 +1360,7 @@ class RecordSession(Thread):
                     self.file_deq.append(ts)
                     filename = f'{self.file_num:020}.ts'
                     if RecordSession.SINGLE_THREAD:
-                        self.save_to_file(ts, filename)
+                        downloaded_bytes += self.save_to_file(ts, filename)
                     else:
                         self.record_executor.submit(self.save_to_file, ts, f'{self.file_num:020}.ts')
 
@@ -1357,6 +1374,11 @@ class RecordSession(Thread):
             if time.time() - start_time > RecordSession.STAT_INTERVAL:
                 self.empty_count = 0
                 self.missed = 0
+
+            if downloaded_bytes >= RecordSession.MAX_SIZE:
+                self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time() * 1000000)))
+                os.mkdir(self.output_dir)
+                downloaded_bytes = 0
 
             time.sleep(0.5)
 
