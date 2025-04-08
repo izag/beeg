@@ -41,13 +41,30 @@ HEADERS = {
     'Referer': REFERER
 }
 
+CHATUBAT_NET_RU_HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Referer': 'https://chaturbat.net.ru',
+    'Host': 'chaturbat.net.ru',
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'X-Requested-With': 'XMLHttpRequest',
+    'DNT': '1',
+    'Sec-GPC': '1',
+    'Connection': 'keep-alive',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'TE': 'trailers',
+}
+
 TIMEOUT = (3.05, 9.05)
 SHORT_IMG_DELAY = 2000
 LONG_IMG_DELAY = 30000
 SHORT_REC_DURATION = 120
 PAD = 5
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp3")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -141,7 +158,7 @@ class MainWindow:
         self.cb_model.focus_set()
         self.cb_model.grid(row=self.level, column=0, columnspan=3, sticky=W + E, padx=PAD, pady=PAD)
 
-        self.btn_add = Button(root, text="+", command=self.add_to_favorites)
+        self.btn_add = Button(root, text="+", command=self.add_to_combobox)
         self.btn_add.grid(row=self.level, column=3, sticky=W + E, padx=PAD, pady=PAD)
 
         self.btn_remove = Button(root, text=" - ", command=self.remove_from_favorites)
@@ -233,10 +250,8 @@ class MainWindow:
         # self.vlc_instance = vlc.Instance()
         # self.media_player = self.vlc_instance.media_player_new()
 
-        # edge for browsing 
-        self.edge = None
+        # edge for browsing
         self.edges = {}
-        self.suffix = None
 
     def on_btn_start(self):
         if self.record_started:
@@ -255,18 +270,20 @@ class MainWindow:
         if not success:
             return
         
-        session = self.record_sessions.get(self.model_name, None)
+        model = self.model_name
+        session = self.record_sessions.get(model, None)
         if session is not None and session.is_alive():
             self.process_online_model()
             self.disable_for_update(NORMAL)
             return
         
         if self.base_url is None or self.resolution is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, duration))
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, model, True)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, model, duration))
             return
 
-        self.start_recording(duration)
+        # in case of edge url input
+        self.start_recording(model, duration)
 
     def on_record(self, duration):
         session = self.record_sessions.get(self.model_name, None)
@@ -277,30 +294,32 @@ class MainWindow:
         if not success:
             return
         
+        model = self.model_name
         if self.base_url is None or self.resolution is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry, True)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, duration))
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, model, True)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, model, duration))
             return
 
-        self.start_recording(duration)
+        # in case of edge url input
+        self.start_recording(model, duration)
 
-    def after_successful_start(self, future, duration):
+    def after_successful_start(self, future, model, duration):
         success = future.result()
         if not success:
             self.set_undefined_state()
             self.disable_for_update(NORMAL)
             return
 
-        self.start_recording(duration)
+        self.start_recording(model, duration)
 
-    def start_recording(self, duration):
-        session = RecordSession(self, self.base_url, self.model_name, self.resolution, self.hist_logger, duration)
-        self.record_sessions[self.model_name] = session
+    def start_recording(self, model, duration):
+        session = RecordSession(self, self.base_url, model, self.resolution, self.hist_logger, duration)
+        self.record_sessions[model] = session
         session.start()
 
         self.record_started = True
         self.btn_start.config(image=self.img_stop)
-        self.add_to_favorites()
+        self.add_model_to_combobox(model)
         self.process_online_model()
         self.disable_for_update(NORMAL)
 
@@ -364,9 +383,9 @@ class MainWindow:
             chunk_pos = input_url.rfind('chunklist')
             if chunk_pos >= 0:
                 self.resolution = input_url[chunk_pos:]
-            found = re.search(r"https://(.*?)/", input_url, re.DOTALL)
-            if (found is not None) and (found.group(0) is not None):
-                self.edge = found.group(1)
+            # found = re.search(r"https://(.*?)/", input_url, re.DOTALL)
+            # if (found is not None) and (found.group(0) is not None):
+            #     self.edge = found.group(1)
         elif input_url.startswith('http'):
             slash_pos = input_url[: -1].rfind('/')
             self.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
@@ -381,14 +400,29 @@ class MainWindow:
             return
 
         if self.base_url is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry, False)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_get_resolutions, f))
+            get_resolutions_future = executor.submit(self.test_online)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_test_online, f))
             return
 
         self.process_online_model()
         self.disable_for_update(NORMAL)
 
-    def after_get_resolutions(self, future):
+    def test_online(self):
+        img_url = HTTP_IMG_URL + self.model_name + f"&f={random.random()}"
+        try:
+            response = self.http_session.get(img_url, timeout=TIMEOUT)
+            if response.status_code != 200:
+                return False
+            
+            img = Image.open(io.BytesIO(response.content))
+            return True
+        except BaseException as error:
+            print("Exception URL: " + img_url)
+            print(error)
+            traceback.print_exc()
+            return False
+
+    def after_test_online(self, future):
         success = future.result()
         self.disable_for_update(NORMAL)
         if not success:
@@ -405,25 +439,26 @@ class MainWindow:
 
     def disable_for_update(self, new_state):
         self.btn_update.config(state=new_state)
-        self.btn_prev.config(state=new_state)
-        self.btn_next.config(state=new_state)
-        self.btn_play.config(state=new_state)
-        self.btn_copy.config(state=new_state)
-        self.btn_paste.config(state=new_state)
+        # self.btn_prev.config(state=new_state)
+        # self.btn_next.config(state=new_state)
+        # self.btn_play.config(state=new_state)
+        # self.btn_copy.config(state=new_state)
+        # self.btn_paste.config(state=new_state)
         self.btn_start.config(state=new_state)
         self.btn_paste_record.config(state=new_state)
         self.btn_record_short.config(state=new_state)
-        if self.hist_window is not None:
-            self.hist_window.list_box.config(state=new_state)
+        # if self.hist_window is not None:
+        #     self.hist_window.list_box.config(state=new_state)
 
-
-    def add_to_favorites(self):
+    def add_to_combobox(self):
         input_url = self.cb_model.get().strip()
         name = get_model_name(input_url)
+        self.add_model_to_combobox(name)
 
-        if (len(name) > 0) and (name not in self.cb_model['values']):
-            self.cb_model['values'] = (name, *self.cb_model['values'])
-            self.hist_logger.info(name)
+    def add_model_to_combobox(self, model):
+        if (len(model) > 0) and (model not in self.cb_model['values']):
+            self.cb_model['values'] = (model, *self.cb_model['values'])
+            self.hist_logger.info(model)
 
         if len(self.cb_model['values']) > 1:
             self.btn_next.config(state=NORMAL)
@@ -494,25 +529,8 @@ class MainWindow:
         self.update_model_info_async(True)
 
     def get_hls_source(self):
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0',
-            'Referer': 'https://chaturbat.net.ru',
-            'Host': 'chaturbat.net.ru',
-            'Accept': 'application/json, text/javascript, */*; q=0.01',
-            'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-            'Accept-Encoding': 'gzip, deflate, br, zstd',
-            'X-Requested-With': 'XMLHttpRequest',
-            'DNT': '1',
-            'Sec-GPC': '1',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'TE': 'trailers',
-        }
-
         try:
-            self.http_session.headers.update(headers)
+            self.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.http_session)
             # r = scraper.get(f"https://chaturbat.net.ru/{self.model_name}", timeout=(3.05, 9.05))
@@ -531,25 +549,27 @@ class MainWindow:
             print(error)
             traceback.print_exc()
 
-    def get_resolutions(self, for_record):
-        model_edge = self.edges.get(self.model_name, None)
+    def get_resolutions(self, model, for_record):
+        playlist_url = self.edges.get(model, None)
         # if self.edge is None or for_record:
-        if model_edge is None:
+        if playlist_url is None:
             playlist_url = self.get_hls_source()
             if playlist_url is None or len(playlist_url) < 1:
                 return False
 
-            found = re.search(r"https://(.*?)/live-hls/amlst:(.*?)-sd-(.*?)/playlist.m3u8", playlist_url, re.DOTALL)
-            if (found is not None) and (found.group(0) is not None):
-                self.edge = found.group(1)
-                if for_record:
-                    self.edges[self.model_name] = found.group(1)
-                    self.suffix = found.group(3)
-        else:
-            playlist_url = f"https://{model_edge}/live-hls/amlst:{self.model_name}-sd-{self.suffix}/playlist.m3u8"
-            self.edge = model_edge
+            # found = re.search(r"https://(.*?)/live-hls/amlst:(.*?)-sd-(.*?)/playlist.m3u8", playlist_url, re.DOTALL)
+            # if (found is not None) and (found.group(0) is not None):
+            #     self.edge = found.group(1)
+            #     if for_record:
+            #         self.edges[model] = found.group(1)
+            #         self.suffix = found.group(3)
+            # else:
+            #     print("Url", playlist_url, "doesn't match the template!")
         # else:
-        #     playlist_url = f"https://{self.edge}/live-hls/amlst:{self.model_name}-sd-{self.suffix}/playlist.m3u8"
+        #     playlist_url = f"https://{model_edge}/live-hls/amlst:{model}-sd-{self.suffix}/playlist.m3u8"
+        #     self.edge = model_edge
+        # else:
+        #     playlist_url = f"https://{self.edge}/live-hls/amlst:{model}-sd-{self.suffix}/playlist.m3u8"
 
         try:
             self.http_session.headers.update(HEADERS)
@@ -559,11 +579,12 @@ class MainWindow:
                 r = self.http_session.get(redirect_url, timeout=TIMEOUT)
 
             if r.status_code == 404:
-                print("get_resolutions status code 404 for model: " + self.model_name)
-                if model_edge == self.edge:
-                    del self.edges[self.model_name]
-                self.edge = None
+                print("get_resolutions status code 404 for url:", playlist_url)
+                del self.edges[model]
                 return False
+
+            print("Url is OK:", playlist_url)
+            self.edges[model] = playlist_url
 
             lines = r.text.splitlines()
 
@@ -580,24 +601,22 @@ class MainWindow:
             self.base_url = actual_url[: slash_pos + 1]
             return True
         except RequestException as error:
-            print("GetPlayList exception model: " + self.model_name)
+            print("GetPlayList exception model: " + model)
             print(error)
             traceback.print_exc()
 
-            if model_edge == self.edge:
-                del self.edges[self.model_name]
-            self.edge = None
+            del self.edges[model]
             
             return False
         
-    def get_resolutions_retry(self, for_record):
-        success = self.get_resolutions(for_record)
+    def get_resolutions_retry(self, model, for_record):
+        success = self.get_resolutions(model, for_record)
         if not success:
-            success = self.get_resolutions(for_record)
+            success = self.get_resolutions(model, for_record)
         if not success:
-            success = self.get_resolutions(for_record)
+            success = self.get_resolutions(model, for_record)
         if not success:
-            success = self.get_resolutions(for_record)
+            success = self.get_resolutions(model, for_record)
 
         return success
 
@@ -739,7 +758,7 @@ class MainWindow:
             chunks = self.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                edge_addr = self.edges.get(self.model_name, self.edge)
+                edge_addr = '' # self.edges.get(self.model_name, self.edge)
                 root.title(f'{stats} {edge_addr} : {self.model_name} ({best_bandwidth}) ')
 
         session = self.record_sessions.get(self.model_name, None)
@@ -761,7 +780,7 @@ class MainWindow:
     def set_undefined_state(self):
         self.model_image = None
         self.image_label.config(image=None)
-        self.model_name = None
+        # self.model_name = None
         self.img_url = None
         self.resolution = None
         self.update_title()
@@ -1164,11 +1183,14 @@ class HistoryWindow:
         self.set_controls_state(NORMAL)
 
     def on_test(self):
-        self.test_online_start = 0
         for i in range(self.list_box.size()):
             self.list_box.itemconfig(i, {'fg': 'black'})
 
-        self.on_test_next()
+        self.set_controls_state(DISABLED)
+
+        test_future = executor.submit(self.get_models)
+        test_future.add_done_callback(lambda f: root.after_idle(self.after_get_models, f))
+
 
     def on_test_next(self):
         items = self.list_box.get(self.test_online_start, self.test_online_start + HistoryWindow.MAX_QUERY_SIZE - 1)
@@ -1181,6 +1203,36 @@ class HistoryWindow:
         # self.set_controls_state(DISABLED)
 
         # executor.submit(self.test_online, model_list)
+
+    def get_models(self):
+        try:
+            self.parent_window.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
+            self.parent_window.http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(self.parent_window.http_session)
+            r = scraper.get(f"https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
+            if r.status_code != 200:
+                return None
+            
+            result = r.json()
+
+            online_models = set([model['username'] for model in result if model['current_show'] == 'public'])
+
+            return online_models
+        except BaseException as error:
+            print(error)
+            traceback.print_exc()
+
+    def after_get_models(self, future):
+        online_models = future.result()
+        if online_models is None:
+            return
+        
+        print(len(online_models))
+
+        for i, item in enumerate(self.list_box.get(0, END)):
+            self.list_box.itemconfig(i, {'fg': 'red' if item in online_models else 'blue'})
+
+        self.set_controls_state(NORMAL)
 
     def set_controls_state(self, state):
         self.btn_test.config(state=state)
