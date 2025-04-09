@@ -1,5 +1,7 @@
+import datetime
 import io
 import json
+import os
 import random
 import time
 from tkinter import TOP, Entry, Menu, StringVar, Toplevel, ttk
@@ -28,6 +30,17 @@ from tbselenium.tbdriver import TorBrowserDriver
 random.seed()
 
 PAD = 0
+LOGS = "./logs/"
+ALL_TIME = 0
+HOUR = 60 * 60
+TWO_HOURS = 2 * HOUR
+SIX_HOURS = 6 * HOUR
+HALF_DAY = 12 * HOUR
+DAY = 24 * HOUR
+TWO_DAYS = 2 * DAY
+WEEK = 7 * DAY
+MONTH = 30 * DAY
+THREE_MONTHS = 3 * MONTH
 TIMEOUT = (3.05, 9.05)
 IMG_WIDTH = 180
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
@@ -61,6 +74,23 @@ STREAM_HEADERS = {
     'Priority': 'u=5, i'
 }
 
+CHATUBAT_NET_RU_HEADERS = {
+    'User-Agent': USER_AGENT,
+    'Referer': 'https://chaturbat.net.ru',
+    'Host': 'chaturbat.net.ru',
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    'Accept-Encoding': 'gzip, deflate, br, zstd',
+    'X-Requested-With': 'XMLHttpRequest',
+    'DNT': '1',
+    'Sec-GPC': '1',
+    'Connection': 'keep-alive',
+    'Sec-Fetch-Dest': 'empty',
+    'Sec-Fetch-Mode': 'cors',
+    'Sec-Fetch-Site': 'same-origin',
+    'TE': 'trailers',
+}
+
 class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
     def __init__(self, maxsize=1, *args, **kwargs):
         super(ThreadPoolExecutorWithQueueSizeLimit, self).__init__(*args, **kwargs)
@@ -69,6 +99,9 @@ class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
 executor = ThreadPoolExecutor(max_workers=5)
 root = Tk()
 
+# selenium driver spoils cwd 
+working_dir = os.getcwd()
+
 # firefox_profile = webdriver.FirefoxProfile('C:\\Users\\Gregory\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\zlk8ndod.default-release\\')
 # firefox_profile.set_preference('browser.privatebrowsing.autostart', True)
 # options = Options()
@@ -76,6 +109,8 @@ root = Tk()
 # driver = webdriver.Firefox(options=options)
 
 driver = TorBrowserDriver(tbb_fx_binary_path="C:\\Users\\Gregory\\Desktop\\TorBrowser\\Browser\\firefox.exe", tbb_profile_path="C:\\Users\\Gregory\\Desktop\\TorBrowser\\Browser\\TorBrowser\\Data\\Browser\\profile.default\\")
+
+os.chdir(working_dir)
 
 image_loader_session = requests.Session()
 image_loader_session.headers.update(STREAM_HEADERS)
@@ -89,9 +124,21 @@ class MainWindow:
 
         root.bind("<FocusIn>", self.focus_in_callback)
 
-        # self.menu_bar = Menu(root)
-        # self.menu_bar.add_command(label="Preview", command=self.show_preview)
-        # root.config(menu=self.menu_bar)
+        self.menu_bar = Menu(root)
+        root.config(menu=self.menu_bar)
+
+        self.hist_menu = Menu(self.menu_bar, tearoff=0)
+        self.hist_menu.add_command(label="All time", command=lambda: self.show_full_history(ALL_TIME))
+        self.hist_menu.add_command(label="Last hour", command=lambda: self.show_full_history(HOUR))
+        self.hist_menu.add_command(label="Two hours", command=lambda: self.show_full_history(TWO_HOURS))
+        self.hist_menu.add_command(label="Six hours", command=lambda: self.show_full_history(SIX_HOURS))
+        self.hist_menu.add_command(label="Half day", command=lambda: self.show_full_history(HALF_DAY))
+        self.hist_menu.add_command(label="Last day", command=lambda: self.show_full_history(DAY))
+        self.hist_menu.add_command(label="Two days", command=lambda: self.show_full_history(TWO_DAYS))
+        self.hist_menu.add_command(label="Week", command=lambda: self.show_full_history(WEEK))
+        self.hist_menu.add_command(label="Month", command=lambda: self.show_full_history(MONTH))
+        self.hist_menu.add_command(label="Three months", command=lambda: self.show_full_history(THREE_MONTHS))
+        self.menu_bar.add_cascade(label="History", menu=self.hist_menu)
 
         frm_top = Frame(root)
 
@@ -228,6 +275,39 @@ class MainWindow:
         self.loading_task = executor.submit(self.refresh)
         self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
 
+    def show_full_history(self, period):
+        global root
+
+        if self.loading_task is not None and not self.loading_task.done():
+            if not self.loading_task.cancel():
+                self.stop_event.set()
+
+        root.title(f'History for period {period}')
+        self.set_controls_state(DISABLED)
+        self.frm_main.scroll_top_left()
+        for btn in self.image_buttons:
+            btn.reset()
+
+        self.loading_task = executor.submit(self.test_online, period)
+        self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
+
+    def test_online(self, period):
+        history = load_hist_dict(period)
+        hist = sorted(history.items(), key=lambda x: x[1], reverse=True)
+        online_models = get_all_online()
+
+        if online_models is None:
+            return
+
+        models = []
+        for model_name, weight in hist:
+            model = online_models.get(model_name, None)
+            if model is None:
+                continue
+            models.append((model['username'], model['image_url'], model['country']))
+
+        self.reconfigure_buttons(models)
+
     def set_controls_state(self, status):
         self.btn_back.config(state=status)
         self.btn_home.config(state=status)
@@ -237,6 +317,7 @@ class MainWindow:
         self.btn_load.config(state=status)
         self.btn_next.config(state=status)
         self.btn_prev.config(state=status)
+        self.menu_bar.entryconfig("History", state=status)
 
         # for btn in self.image_buttons:
         #     btn.config(state=status)
@@ -282,37 +363,6 @@ class MainWindow:
         finally:
             self.stop_event.clear()
             http_session.close()
-
-    # def reconfigure_buttons_more_like(self, buttons, models):
-    #     headers = {
-    #         'User-Agent': USER_AGENT,
-    #         'Referer': 'https://chaturbate.com',
-    #         'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-    #         'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-    #         'Accept-Encoding': 'gzip, deflate, br',
-    #         'Connection': 'keep-alive',
-    #         'Sec-Fetch-Dest': 'empty',
-    #         'Sec-Fetch-Mode': 'cors',
-    #         'Sec-Fetch-Site': 'same-origin',
-    #     }
-
-    #     http_session = requests.Session()
-    #     http_session.headers.update(headers)
-
-    #     try:
-    #         i = 0
-    #         for button in buttons:
-    #             if i >= len(models):
-    #                 break
-
-    #             model_info = models[i]
-    #             self.reconfigure_button(http_session, button, model_info['room'], model_info['img'])
-    #             i += 1
-    #     except BaseException as error:
-    #         print(error)
-    #         traceback.print_exc()
-    #     finally:
-    #         http_session.close()
 
     def reconfigure_button(self, http_session, cell, url, img_url, location):
         global root
@@ -413,32 +463,28 @@ class MainWindow:
 
         self.preview_window.lift()
 
-# def get_all():
-#     headers = {
-#         'User-Agent': USER_AGENT,
-#         'Referer': 'https://chaturbat.net.ru',
-#         'Accept': 'application/json, text/javascript, */*; q=0.01',
-#         'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
-#         'Accept-Encoding': 'gzip, deflate, br',
-#         'X-Requested-With': 'XMLHttpRequest',
-#         'Connection': 'keep-alive',
-#         'Sec-Fetch-Dest': 'empty',
-#         'Sec-Fetch-Mode': 'cors',
-#         'Sec-Fetch-Site': 'same-origin',
-#     }
 
-#     try:
-#         with requests.Session() as http_session:
-#             http_session.headers.update(headers)
-#             http_session.adapters['https://'].max_retries = Retry.DEFAULT
-#             scraper = cloudscraper.create_scraper(http_session)
-#             r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
-#             if r.status_code != 200:
-#                 return
-#             return r.json()
-#     except BaseException as error:
-#         print(error)
-#         traceback.print_exc()
+def get_all_online():
+    try:
+        with requests.Session() as http_session:
+            http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
+            http_session.adapters['https://'].max_retries = Retry.DEFAULT
+            scraper = cloudscraper.create_scraper(http_session)
+            r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=TIMEOUT)
+            if r.status_code != 200:
+                return None
+            
+            result = r.json()
+            online_models = {}
+            for model in result:
+                if model['current_show'] != 'public':
+                    continue
+                online_models[model['username']] = model
+
+            return online_models
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
 
 
 def get_all(gender, page):
@@ -481,6 +527,47 @@ def resize_image(img, width):
     w, h = img.size
     k = width / w
     return img.resize((width, int(h * k)), resample=Image.Resampling.NEAREST, reducing_gap=1.0)
+
+
+def load_hist_dict(period):
+    now = time.time()
+
+    res = {}
+    for file in os.listdir(LOGS):
+        if not file.startswith('hist_'):
+            continue
+
+        full_path = os.path.join(LOGS, file)
+        if os.path.getsize(full_path) == 0:
+            continue
+
+        mtime = os.path.getmtime(full_path)
+        diff = now - mtime
+
+        if (period != ALL_TIME) and (diff > period):
+            continue
+
+        with open(full_path) as f:
+            for line in f.readlines():
+                parts = line.strip().split('\t')
+
+                if len(parts) == 1:
+                    name = parts[0]
+                else:
+                    stamp = datetime.datetime.strptime(parts[0], '%Y-%m-%d %H:%M:%S,%f').timestamp()
+                    name = parts[1]
+                    diff = now - stamp
+                    if (period != ALL_TIME) and (diff > period):
+                        continue
+
+                # broken line
+                if '\x00' == name[0]:
+                    continue
+
+                count = res.get(name, 0)
+                res[name] = count + 1
+
+    return res
 
 
 class ModelFrame(Frame):
