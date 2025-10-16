@@ -45,8 +45,8 @@ CHATUBAT_NET_RU_HEADERS = {
     'User-Agent': USER_AGENT,
     'Referer': 'https://chaturbat.net.ru',
     'Host': 'chaturbat.net.ru',
-    'Accept': 'application/json, text/javascript, */*; q=0.01',
-    'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.5',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
     'X-Requested-With': 'XMLHttpRequest',
     'DNT': '1',
@@ -56,7 +56,9 @@ CHATUBAT_NET_RU_HEADERS = {
     'Sec-Fetch-Mode': 'cors',
     'Sec-Fetch-Site': 'same-origin',
     'TE': 'trailers',
+    'X-App-Access': 'ALLOW-FRONTEND'
 }
+
 
 TIMEOUT = (3.05, 9.05)
 SHORT_IMG_DELAY = 2000
@@ -64,7 +66,8 @@ LONG_IMG_DELAY = 30000
 SHORT_REC_DURATION = 120
 PAD = 5
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp1")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp3")
+# OUTPUT = os.path.join("/mnt/localdrive/tmp", "tmp1")
 LOGS = "./logs/"
 
 ALL_TIME = 0
@@ -141,9 +144,6 @@ class MainWindow:
         self.record_started = False
         self.hist_window = None
 
-        self.model_name = None
-        self.resolution = None
-
         self.level = 0
 
         self.image_label = Label(root)
@@ -210,9 +210,10 @@ class MainWindow:
         root.bind("<FocusIn>", self.focus_in_callback)
         root.bind("<FocusOut>", self.focus_out_callback)
         root.protocol("WM_DELETE_WINDOW", self.on_close)
+        root.bind("<Configure>", self.update_wraplength)
 
         self.play_list_url = None
-        self.base_url = None
+        self.room = Room()
         self.model_image = None
         self.img_url = None
         self.scan_idx = -1
@@ -266,60 +267,60 @@ class MainWindow:
         model = clipboard.paste()
         self.cb_model.set(model)
 
-        success = self.update_base_url(True)
+        success = self.update_room(True)
         if not success:
             return
         
-        model = self.model_name
-        session = self.record_sessions.get(model, None)
+        room = self.room
+        session = self.record_sessions.get(room.model_name, None)
         if session is not None and session.is_alive():
             self.process_online_model()
             self.disable_for_update(NORMAL)
             return
         
-        if self.base_url is None or self.resolution is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry, model, True)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, model, duration))
+        if room.base_url is None or room.resolution is None:
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, room)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, room, duration))
             return
 
         # in case of edge url input
-        self.start_recording(model, duration)
+        self.start_recording(room, duration)
 
     def on_record(self, duration):
-        session = self.record_sessions.get(self.model_name, None)
+        session = self.record_sessions.get(self.room.model_name, None)
         if session is not None and session.is_alive():
             return
         
-        success = self.update_base_url(True)
+        success = self.update_room(True)
         if not success:
             return
         
-        model = self.model_name
-        if self.base_url is None or self.resolution is None:
-            get_resolutions_future = executor.submit(self.get_resolutions_retry, model, True)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, model, duration))
+        room = self.room
+        if room.base_url is None or room.resolution is None:
+            get_resolutions_future = executor.submit(self.get_resolutions_retry, room)
+            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_successful_start, f, room, duration))
             return
 
         # in case of edge url input
-        self.start_recording(model, duration)
+        self.start_recording(room, duration)
 
-    def after_successful_start(self, future, model, duration):
+    def after_successful_start(self, future, room, duration):
         success = future.result()
         if not success:
             self.set_undefined_state()
             self.disable_for_update(NORMAL)
             return
 
-        self.start_recording(model, duration)
+        self.start_recording(room, duration)
 
-    def start_recording(self, model, duration):
-        session = RecordSession(self, self.base_url, model, self.resolution, self.hist_logger, duration)
-        self.record_sessions[model] = session
+    def start_recording(self, room, duration):
+        session = RecordSession(self, room, self.hist_logger, duration)
+        self.record_sessions[room.model_name] = session
         session.start()
 
         self.record_started = True
         self.btn_start.config(image=self.img_stop)
-        self.add_model_to_combobox(model)
+        self.add_model_to_combobox(room.model_name)
         self.process_online_model()
         self.disable_for_update(NORMAL)
 
@@ -328,12 +329,12 @@ class MainWindow:
         self.update_title()
 
     def stop(self):
-        session = self.record_sessions.get(self.model_name, None)
+        session = self.record_sessions.get(self.room.model_name, None)
         if session is None:
             return
 
         session.stop()
-        del self.record_sessions[self.model_name]
+        del self.record_sessions[self.room.model_name]
 
     def copy_model_name(self):
         clipboard.copy(self.cb_model.get())
@@ -342,20 +343,20 @@ class MainWindow:
         self.load_model(clipboard.paste(), True)
 
     def copy_model_link(self):
-        clipboard.copy(urljoin(self.base_url, 'playlist.m3u8'))
+        clipboard.copy(urljoin(self.room.base_url, 'playlist.m3u8'))
 
     def play_recording(self):
-        session = self.record_sessions.get(self.model_name, None)
+        session = self.record_sessions.get(self.room.model_name, None)
         if session is None or not session.is_alive():
             return
 
         clipboard.copy(session.output_dir)
         executor.submit(send_to_player, session.output_dir) 
 
-    def update_base_url(self, remember):
-        if remember and (self.model_name is not None):
-            if len(self.hist_stack) == 0 or (self.model_name != self.hist_stack[-1]):
-                self.hist_stack.append(self.model_name)
+    def update_room(self, remember):
+        if remember and (self.room.model_name is not None):
+            if len(self.hist_stack) == 0 or (self.room.model_name != self.hist_stack[-1]):
+                self.hist_stack.append(self.room.model_name)
 
         self.set_undefined_state()
         self.disable_for_update(DISABLED)
@@ -369,49 +370,47 @@ class MainWindow:
             self.disable_for_update(NORMAL)
             return False
 
-        self.base_url = None
+        self.room = Room()
         if input_url.startswith('https://edge'):
             slash_pos = input_url.rfind('/')
-            self.base_url = input_url[: slash_pos + 1]
-            colon_pos = self.base_url.rfind(':', 0, -1)
+            self.room.base_url = input_url[: slash_pos + 1]
+            colon_pos = self.room.base_url.rfind(':', 0, -1)
 
-            sd_pos = self.base_url.find('-sd-', colon_pos)
+            sd_pos = self.room.base_url.find('-sd-', colon_pos)
             if sd_pos == -1:
-                sd_pos = self.base_url.find('-ws-', colon_pos)
+                sd_pos = self.room.base_url.find('-ws-', colon_pos)
 
-            self.model_name = self.base_url[colon_pos + 1: sd_pos]
+            self.room.model_name = self.room.base_url[colon_pos + 1: sd_pos]
             chunk_pos = input_url.rfind('chunklist')
             if chunk_pos >= 0:
-                self.resolution = input_url[chunk_pos:]
-            # found = re.search(r"https://(.*?)/", input_url, re.DOTALL)
-            # if (found is not None) and (found.group(0) is not None):
-            #     self.edge = found.group(1)
+                self.room.resolution = input_url[chunk_pos:]
         elif input_url.startswith('http'):
             slash_pos = input_url[: -1].rfind('/')
-            self.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
+            self.room.model_name = input_url[slash_pos + 1: -1] if input_url.endswith('/') else input_url[slash_pos + 1:]
         else:
-            self.model_name = input_url
+            self.room.model_name = input_url
 
         return True
 
     def update_model_info_async(self, remember):
-        success = self.update_base_url(remember)
+        success = self.update_room(remember)
         if not success:
             return
 
-        if self.base_url is None:
-            get_resolutions_future = executor.submit(self.test_online)
-            get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_test_online, f))
-            return
+        # if self.room.base_url is None:
+        get_resolutions_future = executor.submit(self.test_online)
+        get_resolutions_future.add_done_callback(lambda f: root.after_idle(self.after_test_online, f))
+        #     return
 
-        self.process_online_model()
-        self.disable_for_update(NORMAL)
+        # self.process_online_model()
+        # self.disable_for_update(NORMAL)
 
     def test_online(self):
-        img_url = HTTP_IMG_URL + self.model_name + f"&f={random.random()}"
+        img_url = HTTP_IMG_URL + self.room.model_name + f"&f={random.random()}"
         try:
             response = self.http_session.get(img_url, timeout=TIMEOUT)
             if response.status_code != 200:
+                root.after_idle(self.sv_stats.set, f"Test online: status code {response.status_code}")
                 return False
             
             img = Image.open(io.BytesIO(response.content))
@@ -420,6 +419,7 @@ class MainWindow:
             print("Exception URL: " + img_url)
             print(error)
             traceback.print_exc()
+            root.after_idle(self.sv_stats.set, f"Test online: {error}")
             return False
 
     def after_test_online(self, future):
@@ -432,7 +432,7 @@ class MainWindow:
         self.process_online_model()
 
     def process_online_model(self):
-        self.img_url = HTTP_IMG_URL + self.model_name
+        self.img_url = HTTP_IMG_URL + self.room.model_name
         self.update_title()
         # self.set_scan(False)
         self.start_load_image()
@@ -529,62 +529,53 @@ class MainWindow:
         self.update_model_info_async(True)
 
     def get_hls_source(self):
+        global root
+
         try:
             self.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.http_session)
-            # r = scraper.get(f"https://chaturbat.net.ru/{self.model_name}", timeout=(3.05, 9.05))
-            # if r.status_code != 200:
-            #     return None
-            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.model_name}/none.json", timeout=(3.05, 9.05))
+            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.room.model_name}/none.json", timeout=(3.05, 9.05))
             if r.status_code != 200:
+                root.after_idle(self.sv_stats.set, f"Get HLS source: status code {r.status_code}")
                 return None
             result = r.json()
 
             if result['room_status'] != 'public':
+                root.after_idle(self.sv_stats.set, f"Get HLS source: room status {result['room_status']}")
                 return None
 
             return result['hls_source']
         except BaseException as error:
             print(error)
             traceback.print_exc()
+            root.after_idle(self.sv_stats.set, f"Get HLS source: {error}")
 
-    def get_resolutions(self, model, for_record):
-        playlist_url = self.edges.get(model, None)
-        # if self.edge is None or for_record:
+    def get_resolutions(self, model):
+        playlist_url = self.edges.get(model.model_name, None)
         if playlist_url is None:
-            playlist_url = self.get_hls_source()
-            if playlist_url is None or len(playlist_url) < 1:
-                return False
-
-            # found = re.search(r"https://(.*?)/live-hls/amlst:(.*?)-sd-(.*?)/playlist.m3u8", playlist_url, re.DOTALL)
-            # if (found is not None) and (found.group(0) is not None):
-            #     self.edge = found.group(1)
-            #     if for_record:
-            #         self.edges[model] = found.group(1)
-            #         self.suffix = found.group(3)
-            # else:
-            #     print("Url", playlist_url, "doesn't match the template!")
-        # else:
-        #     playlist_url = f"https://{model_edge}/live-hls/amlst:{model}-sd-{self.suffix}/playlist.m3u8"
-        #     self.edge = model_edge
-        # else:
-        #     playlist_url = f"https://{self.edge}/live-hls/amlst:{model}-sd-{self.suffix}/playlist.m3u8"
-
+            if model.base_url is not None:
+                playlist_url = urljoin(model.base_url, 'playlist.m3u8')
+            else:
+                playlist_url = self.get_hls_source()
+                if playlist_url is None or len(playlist_url) < 1:
+                    return False
         try:
             self.http_session.headers.update(HEADERS)
             r = self.http_session.get(playlist_url, timeout=TIMEOUT)
             if r.status_code == 302:
+                root.after_idle(self.sv_stats.set, f"Get resolutions: status code {r.status_code}")
                 redirect_url = r.headers['Location']
                 r = self.http_session.get(redirect_url, timeout=TIMEOUT)
 
             if r.status_code == 404:
+                root.after_idle(self.sv_stats.set, f"Get resolutions: status code {r.status_code}")
                 print("get_resolutions status code 404 for url:", playlist_url)
-                del self.edges[model]
+                del self.edges[model.model_name]
                 return False
 
             print("Url is OK:", playlist_url)
-            self.edges[model] = playlist_url
+            self.edges[model.model_name] = playlist_url
 
             lines = r.text.splitlines()
 
@@ -594,29 +585,30 @@ class MainWindow:
             if len(resolutions) == 0:
                 return False
 
-            self.resolution = resolutions[0]
+            model.resolution = resolutions[0]
 
             actual_url = r.url
             slash_pos = actual_url.rfind('/')
-            self.base_url = actual_url[: slash_pos + 1]
+            model.base_url = actual_url[: slash_pos + 1]
             return True
         except RequestException as error:
-            print("GetPlayList exception model: " + model)
+            root.after_idle(self.sv_stats.set, f"Get resolutions: {error}")
+            print("GetPlayList exception model: " + model.model_name)
             print(error)
             traceback.print_exc()
 
-            del self.edges[model]
+            del self.edges[model.model_name]
             
             return False
         
-    def get_resolutions_retry(self, model, for_record):
-        success = self.get_resolutions(model, for_record)
+    def get_resolutions_retry(self, model):
+        success = self.get_resolutions(model)
         if not success:
-            success = self.get_resolutions(model, for_record)
+            success = self.get_resolutions(model)
         if not success:
-            success = self.get_resolutions(model, for_record)
+            success = self.get_resolutions(model)
         if not success:
-            success = self.get_resolutions(model, for_record)
+            success = self.get_resolutions(model)
 
         return success
 
@@ -648,7 +640,6 @@ class MainWindow:
 
         self.img_counter += 1
         if image_loader_future is None or image_loader_future.done():
-            # if (self.img_url is not None or self.img_counter % 30 == 0) and self.show_image and (self.model_name is not None):
             image_loader_future = image_loader.submit(self.fetch_image)
 
         root.update_idletasks()
@@ -658,9 +649,6 @@ class MainWindow:
         global root
 
         try:
-            # if self.img_counter % 30 == 0:
-            #     self.img_url = HTTP_IMG_URL + self.model_name
-
             response = self.http_session.get(self.img_url, timeout=TIMEOUT)
             img = Image.open(io.BytesIO(response.content))
             w, h = img.size
@@ -678,17 +666,7 @@ class MainWindow:
             self.img_counter = 0
 
     def update_image(self):
-        # self.model_image = ImageTk.PhotoImage(img)
-        # width, height = img.size
-        # self.image_label.config(width=width, height=height)
-        # x_center = width // 2
-        # y_center = height // 2
-        # if self.bg_img is None:
-        #     self.bg_img = self.image_label.create_image(x_center, y_center, image=self.model_image)
-        # else:
-        #     self.image_label.itemconfigure(self.bg_img, image=self.model_image)
-        #     self.image_label.coords(self.bg_img, x_center, y_center)
-        session = self.record_sessions.get(self.model_name, None)
+        session = self.record_sessions.get(self.room.model_name, None)
         if session is not None and session.is_alive():
             remains = session.get_remaining()
             if remains > 0:
@@ -731,12 +709,12 @@ class MainWindow:
         self.progress.stop()
         self.progress.grid_forget()
         self.update_title()
-        root.configure(background='SystemButtonFace')
+        root.configure(background='gray90')
 
     def update_title(self):
         global root
 
-        self.btn_update.configure(background='SystemButtonFace')
+        self.btn_update.configure(background='gray90')
         self.btn_record_short.config(text='Record short')
 
         infinite = 0
@@ -746,22 +724,23 @@ class MainWindow:
 
         stats = f'({len(self.record_sessions)}/{infinite}/{len(self.cb_model['values'])})'
 
-        if self.model_name is None:
+        if self.room.model_name is None:
             self.record_started = False
             self.btn_start.config(image=self.img_record, state=DISABLED)
             root.title(f'{stats} <Undefined>')
             return
         
-        root.title(f'{stats} {self.model_name}')
+        root.title(f'{stats} {self.room.model_name}')
 
-        if self.resolution is not None:
-            chunks = self.resolution.split('_')
+        session = self.record_sessions.get(self.room.model_name, None)
+        if session is not None:
+            self.room.resolution = session.resolution
+
+        if self.room.resolution is not None:
+            chunks = self.room.resolution.split('_')
             if len(chunks) >= 3:
                 best_bandwidth = chunks[2][1:]
-                edge_addr = '' # self.edges.get(self.model_name, self.edge)
-                root.title(f'{stats} {edge_addr} : {self.model_name} ({best_bandwidth}) ')
-
-        session = self.record_sessions.get(self.model_name, None)
+                root.title(f'{stats} : {self.room.model_name} ({best_bandwidth})')
 
         self.record_started = session is not None and session.is_alive()
         self.btn_start.config(state=NORMAL, image=self.img_stop if self.record_started else self.img_record)
@@ -773,16 +752,14 @@ class MainWindow:
         self.btn_update.configure(background='green' if session.duration > 0 else 'red')
         
 
-    def update_active_records(self, model_name):
+    def update_active_records(self):
         self.record_sessions = { model: thread for model, thread in self.record_sessions.items() if thread is not None and thread.is_alive() }
         self.update_title()
 
     def set_undefined_state(self):
         self.model_image = None
         self.image_label.config(image=None)
-        # self.model_name = None
         self.img_url = None
-        self.resolution = None
         self.update_title()
 
     def show_recording_model(self):
@@ -906,6 +883,9 @@ class MainWindow:
     def on_shrink(self):
         pass
 
+    def update_wraplength(self, _event):
+        self.lbl_stats.configure(wraplength=self.lbl_stats.winfo_width())
+
 
 def load_hist_dict(period):
     now = time.time()
@@ -939,7 +919,7 @@ def load_hist_dict(period):
                         continue
 
                 # broken line
-                if '\x00' == name[0]:
+                if len(name) == 0 or '\x00' == name[0]:
                     continue
 
                 count = res.get(name, 0)
@@ -971,6 +951,13 @@ class Model:
         self.model_name = name
         self.pos = pos
         self.is_online = False
+
+
+class Room:
+    def __init__(self):
+        self.model_name = None
+        self.base_url = None
+        self.resolution = None
 
 
 async def fetch(url, session):
@@ -1209,13 +1196,14 @@ class HistoryWindow:
             self.parent_window.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             self.parent_window.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.parent_window.http_session)
-            r = scraper.get(f"https://chaturbat.net.ru/get-models/all", timeout=(3.05, 9.05))
-            if r.status_code != 200:
-                return None
-            
-            result = r.json()
-
-            online_models = set([model['username'] for model in result if model['current_show'] == 'public'])
+            online_models = set()
+            for page in range(1, 100):
+                r = scraper.get(f"https://chaturbat.net.ru/more-models?page={page}", timeout=TIMEOUT)
+                if r.status_code != 200:
+                    return None
+                
+                result = r.json()
+                online_models.update([model['username'] for model in result['models'] if model['current_show'] == 'public'])
 
             return online_models
         except BaseException as error:
@@ -1284,19 +1272,20 @@ class RecordSession(Thread):
     STAT_INTERVAL = 120
     MAX_SIZE = 500_000_000
 
-    def __init__(self, main_win, url_base, model, chunk_url, rating_logger, duration = 0):
+    def __init__(self, main_win, room, rating_logger, duration = 0):
         super(RecordSession, self).__init__()
 
         self.http_session = requests.Session()
         self.http_session.headers.update(HEADERS)
 
         self.main_win = main_win
-        self.base_url = url_base
-        self.model_name = model
+        self.base_url = room.base_url
+        self.model_name = room.model_name
         self.output_dir = os.path.join(OUTPUT, self.model_name + '_' + str(int(time.time() * 1000000)))
         os.mkdir(self.output_dir)
 
-        self.chunks_url = urljoin(self.base_url, chunk_url)
+        self.resolution = room.resolution
+        self.chunks_url = urljoin(self.base_url, room.resolution)
         self.name = 'RecordSession'
         self.stopped = False
         self.daemon = True
@@ -1442,7 +1431,7 @@ class RecordSession(Thread):
             handler.close()
         self.http_session.close()
         if not self.stopped:
-            root.after(1000, self.main_win.update_active_records, self.model_name)
+            root.after(1000, self.main_win.update_active_records)
 
     def stop(self):
         self.stopped = True

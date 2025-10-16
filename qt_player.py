@@ -266,7 +266,7 @@ class VideoFrame(QtWidgets.QFrame):
             self.frm.setWindowState(self.frm.windowState() & ~QtCore.Qt.WindowFullScreen)
             self.frm.buttonsFrame.show()
             self.frm.handleStop()
-            self.frm.setWindowState(self.frm.windowState() | QtCore.Qt.WindowMinimized)
+            # self.frm.setWindowState(self.frm.windowState() | QtCore.Qt.WindowMinimized)
 
 
 class Window(QtWidgets.QMainWindow):
@@ -334,7 +334,7 @@ class Window(QtWidgets.QMainWindow):
         self.buttonsFrame.hide()
         # this will remove minimized status 
         # and restore window with keeping maximized/normal state
-        self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
+        # self.setWindowState(self.windowState() & ~QtCore.Qt.WindowMinimized | QtCore.Qt.WindowActive)
 
         # this will activate the window
         self.activateWindow()
@@ -362,11 +362,11 @@ class Window(QtWidgets.QMainWindow):
             self.buttonsFrame.hide()
             self.setWindowState(self.windowState() | QtCore.Qt.WindowFullScreen)
             
-    # def mousePressEvent(self, QMouseEvent):
-    #     if QMouseEvent.button() == QtCore.Qt.RightButton:
-    #         self.setWindowState(self.windowState() & ~QtCore.Qt.WindowFullScreen)
-    #         self.buttonsFrame.show()
-    #         self.handleStop()
+    def mousePressEvent(self, QMouseEvent):
+        if QMouseEvent.button() == QtCore.Qt.RightButton:
+            self.setWindowState(self.windowState() & ~QtCore.Qt.WindowFullScreen)
+            self.buttonsFrame.show()
+            self.handleStop()
 
 class Messenger(object):
     def __init__(self):

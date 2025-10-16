@@ -41,7 +41,7 @@ TWO_DAYS = 2 * DAY
 WEEK = 7 * DAY
 MONTH = 30 * DAY
 THREE_MONTHS = 3 * MONTH
-TIMEOUT = (3.05, 9.05)
+TIMEOUT = (3.05, 23.05)
 IMG_WIDTH = 180
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
 ROWS = 24
@@ -96,7 +96,8 @@ class ThreadPoolExecutorWithQueueSizeLimit(ThreadPoolExecutor):
         super(ThreadPoolExecutorWithQueueSizeLimit, self).__init__(*args, **kwargs)
         self._work_queue = Queue(maxsize=maxsize)
 
-executor = ThreadPoolExecutor(max_workers=5)
+# selenium supports only 1 thread
+executor = ThreadPoolExecutor(max_workers=1)
 root = Tk()
 
 # selenium driver spoils cwd 
@@ -171,6 +172,9 @@ class MainWindow:
         self.btn_next = Button(frm_top, text="Next", command=self.show_next_page)
         self.btn_next.grid(row=0, column=8, sticky=EW)
 
+        self.btn_last = Button(frm_top, text="Last", command=self.show_last_page)
+        self.btn_last.grid(row=0, column=9, sticky=EW)
+
         self.frm_main = ScrollFrame(root)
         self.image_buttons = self.fill_panel(self.frm_main.view_port)
 
@@ -183,6 +187,9 @@ class MainWindow:
         self.hist_stack = []
         self.page = 0
         self.gender = None
+        self.view_history = False
+        self.hist_models = []
+        self.hist_period = 0
 
         self.loading_task = None
         self.stop_event = Event()
@@ -196,17 +203,45 @@ class MainWindow:
 
     def show_next_page(self):
         self.page += 1
-        self.show_page_in_thread()
+
+        if self.view_history:
+            success = self.show_history_in_thread()
+            if not success:
+                self.page -= 1
+        else:
+            self.show_page_in_thread()
 
     def show_prev_page(self):
-        if self.page > 0:
-            self.page -= 1
+        if self.page <= 0:
+            return
+        
+        self.page -= 1
 
-        self.show_page_in_thread()
+        if self.view_history:
+            success = self.show_history_in_thread()
+            if not success:
+                self.page += 1
+        else:
+            self.show_page_in_thread()
+
+    def show_last_page(self):
+        if not self.view_history:
+            return
+        
+        if len(self.hist_models) == 0:
+            return
+
+        num_buttons = COLS * ROWS
+        previous_value = self.page
+        self.page = (len(self.hist_models) - 1) // num_buttons
+        success = self.show_history_in_thread()
+        if not success:
+            self.page = previous_value
 
     def show_home_page(self, gender=None):
         self.page = 0
         self.gender = gender
+        self.view_history = False
         self.show_page_in_thread()
 
     def show_page_in_thread(self):
@@ -282,7 +317,10 @@ class MainWindow:
             if not self.loading_task.cancel():
                 self.stop_event.set()
 
-        root.title(f'History for period {period}')
+        self.page = 0
+        self.view_history = True
+        self.hist_period = period
+        root.title(f'History for period {self.hist_period} page {self.page}')
         self.set_controls_state(DISABLED)
         self.frm_main.scroll_top_left()
         for btn in self.image_buttons:
@@ -299,14 +337,42 @@ class MainWindow:
         if online_models is None:
             return
 
-        models = []
+        self.hist_models = []
         for model_name, weight in hist:
             model = online_models.get(model_name, None)
             if model is None:
                 continue
-            models.append((model['username'], model['image_url'], model['country']))
+            self.hist_models.append((model['username'], model['image_url'], model['country']))
 
-        self.reconfigure_buttons(models)
+        self.show_history(self.page)
+
+    def show_history_in_thread(self):
+        global root
+
+        if len(self.hist_models) == 0:
+            return False
+
+        if self.page * ROWS * COLS > len(self.hist_models):
+            return False
+
+        if self.loading_task is not None and not self.loading_task.done():
+            if not self.loading_task.cancel():
+                self.stop_event.set()
+
+        root.title(f'History for period {self.hist_period} page {self.page}')
+        self.set_controls_state(DISABLED)
+        self.frm_main.scroll_top_left()
+        for btn in self.image_buttons:
+            btn.reset()
+
+        self.loading_task = executor.submit(self.show_history, self.page)
+        self.loading_task.add_done_callback(lambda f: self.set_controls_state(NORMAL))
+
+        return True
+
+    def show_history(self, page):
+        num_buttons = ROWS * COLS
+        self.reconfigure_buttons(self.hist_models[page * num_buttons : (page + 1) * num_buttons])
 
     def set_controls_state(self, status):
         self.btn_back.config(state=status)
@@ -317,6 +383,7 @@ class MainWindow:
         self.btn_load.config(state=status)
         self.btn_next.config(state=status)
         self.btn_prev.config(state=status)
+        self.btn_last.config(state=status)
         self.menu_bar.entryconfig("History", state=status)
 
         # for btn in self.image_buttons:
@@ -370,7 +437,8 @@ class MainWindow:
         if (img_url is None) or (len(img_url) == 0):
             return
 
-        image = download_image(http_session, img_url.replace('/ri/', '/riw/'))
+        # image = download_image(http_session, img_url.replace('/ri/', '/riw/'))
+        image = download_image(http_session, HTTP_IMG_URL + url)
 
         photo_image = None
         if (image is not None) and (len(image) != 0):
@@ -456,6 +524,7 @@ class MainWindow:
         self.preview_window.deiconify()
         self.preview_window.set_values(model, location)
         self.preview_window.load_main_image_in_thread()
+        self.preview_window.load_hls_source_in_thread()
 
     def focus_in_callback(self, event):
         if event.widget != root:
@@ -465,21 +534,36 @@ class MainWindow:
 
 
 def get_all_online():
+    # driver.get(f'view-source:https://chaturbat.net.ru/get-models/all')
+
+    # content = driver.find_element(By.TAG_NAME, 'pre').text
+    # result = json.loads(content)
+
+    # online_models = {}
+    # for model in result:
+        # if model['current_show'] != 'public':
+            # continue
+        # online_models[model['username']] = model
+
+    # return online_models
+
     try:
         with requests.Session() as http_session:
             http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(http_session)
-            r = scraper.get("https://chaturbat.net.ru/get-models/all", timeout=TIMEOUT)
-            if r.status_code != 200:
-                return None
-            
-            result = r.json()
             online_models = {}
-            for model in result:
-                if model['current_show'] != 'public':
-                    continue
-                online_models[model['username']] = model
+            for page in range(1, 100):
+                r = scraper.get(f"https://chaturbat.net.ru/more-models?page={page}", timeout=TIMEOUT)
+                # r = http_session.get("https://chaturbat.net.ru/get-models/all", timeout=TIMEOUT)
+                if r.status_code != 200:
+                    return None
+            
+                result = r.json()
+                for model in result['models']:
+                    if model['current_show'] != 'public':
+                        continue
+                    online_models[model['username']] = model
 
             return online_models
     except BaseException as error:
@@ -495,7 +579,6 @@ def get_all(gender, page):
 
     driver.get(src)
 
-    content = driver.page_source
     content = driver.find_element(By.TAG_NAME, 'pre').text
     return json.loads(content)
 
@@ -503,24 +586,36 @@ def get_all(gender, page):
 def get_more_like(model):
     driver.get(f'view-source:https://chaturbate.com/api/more_like/{model}/')
 
-    content = driver.page_source
     content = driver.find_element(By.TAG_NAME, 'pre').text
     return json.loads(content)
 
 
-def download_image(http_session, url):
-    qpos = url.rfind('?')
-    if qpos > 0:
-        url = url[:qpos]
-    response = http_session.get(url, timeout=TIMEOUT, allow_redirects=False)
-    if response.status_code == 404:
-        return None
-    
-    if response.status_code != 200:
-        print(url)
-        return None
+def get_hls_source(model):
+    driver.get(f'view-source:https://chaturbate.com/api/chatvideocontext/{model}/')
 
-    return response.content
+    content = driver.find_element(By.TAG_NAME, 'pre').text
+    info = json.loads(content)
+    return info['hls_source']
+
+
+def download_image(http_session, url):
+    # qpos = url.rfind('?')
+    # if qpos > 0:
+        # url = url[:qpos]
+    
+    try:
+        response = http_session.get(url, timeout=TIMEOUT, allow_redirects=False)
+        if response.status_code == 404:
+            return None
+        
+        if response.status_code != 200:
+            print(url)
+            return None
+
+        return response.content
+    except BaseException as error:
+        print(error)
+        traceback.print_exc()
 
 
 def resize_image(img, width):
@@ -561,7 +656,7 @@ def load_hist_dict(period):
                         continue
 
                 # broken line
-                if '\x00' == name[0]:
+                if len(name) == 0 or '\x00' == name[0]:
                     continue
 
                 count = res.get(name, 0)
@@ -728,12 +823,20 @@ class PreviewWindow(Toplevel):
         self.sv_stats = StringVar()
         self.lbl_stats = Label(self, textvariable=self.sv_stats)
         self.lbl_stats.pack(pady=10)
+
+        self.sv_link = StringVar()
+        self.lbl_link = Label(self, textvariable=self.sv_link)
+        self.lbl_link.pack(side="left", fill="x")
+
+        self.btn_link = Button(self, text="Link", command=self.copy_link)
+        self.btn_link.pack(pady=10)
         
         self.geometry(f"+{root.winfo_screenwidth() - 854}+0")
         
         self.protocol("WM_DELETE_WINDOW", self.on_close)
         self.bind("<Enter>", self.on_enter)
         self.bind("<Leave>", self.on_leave)
+        self.bind("<Configure>", self.update_wraplength)
 
         self.main_image_loader = ThreadPoolExecutor(max_workers=1)
         self.main_image_loader_future = None
@@ -743,6 +846,7 @@ class PreviewWindow(Toplevel):
         self.model = None
         self.resize = True
 
+        self.hls_task = None
 
     def on_close(self):
         self.stop()
@@ -801,6 +905,26 @@ class PreviewWindow(Toplevel):
             self.canvas.itemconfigure(self.main_image, image=photo_image)
             self.canvas.coords(self.main_image, x_center, y_center)
 
+    def load_hls_source_in_thread(self):
+        if self.hls_task is not None and not self.hls_task.done():
+            self.hls_task.cancel()
+
+        self.sv_link.set('')
+        self.btn_link.config(state=DISABLED)
+        self.hls_task = executor.submit(get_hls_source, self.model)
+        self.hls_task.add_done_callback(lambda f: root.after_idle(self.after_get_hls_source, f))
+
+    def after_get_hls_source(self, future):
+        hls_source = future.result()
+        if hls_source is None:
+            return
+        
+        self.sv_link.set(hls_source)
+        self.btn_link.config(state=NORMAL)
+
+    def copy_link(self):
+        clipboard.copy(self.sv_link.get())
+
     def set_values(self, model, location):
         self.model = model
         self.title(model or '<Undefined>')
@@ -811,6 +935,9 @@ class PreviewWindow(Toplevel):
 
     def on_leave(self, event):
         self.resize = True
+
+    def update_wraplength(self, _event):
+        self.lbl_link.configure(wraplength=self.lbl_link.winfo_width())
 
 
 if __name__ == "__main__":

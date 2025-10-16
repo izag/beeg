@@ -10,4 +10,4 @@ for /l %%i in (0, 1, 4) do (
 )
 
 
-wmic process where "CommandLine LIKE '%%beeg.py%%'" CALL setpriority "idle"
+REM wmic process where "CommandLine LIKE '%%beeg.py%%'" CALL setpriority "idle"
