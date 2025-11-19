@@ -32,8 +32,6 @@ USER_AGENT = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:93.0) Gecko/20100101 F
 
 REFERER = 'https://jpeg.live.mmcdn.com'
 
-proxies = None
-
 REMEMBER_PROXIES = False
 
 HEADERS = {
@@ -87,6 +85,10 @@ HTTP_IMG_URL = "https://jpeg.live.mmcdn.com/stream?room="
 
 PLAYER_HOST = 'localhost'
 PLAYER_PORT = 8686
+
+PROXIES = {
+    'http': 'http://127.0.0.1:9080'
+}
 
 random.seed(time.time())
 alive_edges = set()
@@ -535,12 +537,12 @@ class MainWindow:
             self.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.http_session)
-            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.room.model_name}/none.json", timeout=(3.05, 9.05))
+            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.room.model_name}/none.json", timeout=TIMEOUT)
             if r.status_code != 200:
                 root.after_idle(self.sv_stats.set, f"Get HLS source: status code {r.status_code}")
                 return None
+            
             result = r.json()
-
             if result['room_status'] != 'public':
                 root.after_idle(self.sv_stats.set, f"Get HLS source: room status {result['room_status']}")
                 return None
@@ -550,6 +552,10 @@ class MainWindow:
             print(error)
             traceback.print_exc()
             root.after_idle(self.sv_stats.set, f"Get HLS source: {error}")
+
+    def get_hls_source_original(self):
+        """TODO: Make local server for urls"""
+        pass
 
     def get_resolutions(self, model):
         playlist_url = self.edges.get(model.model_name, None)
@@ -568,9 +574,9 @@ class MainWindow:
                 redirect_url = r.headers['Location']
                 r = self.http_session.get(redirect_url, timeout=TIMEOUT)
 
-            if r.status_code == 404:
+            if r.status_code != 200:
                 root.after_idle(self.sv_stats.set, f"Get resolutions: status code {r.status_code}")
-                print("get_resolutions status code 404 for url:", playlist_url)
+                print(f"get_resolutions status code {r.status_code} for url:", playlist_url)
                 del self.edges[model.model_name]
                 return False
 

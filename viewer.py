@@ -175,6 +175,9 @@ class MainWindow:
         self.btn_last = Button(frm_top, text="Last", command=self.show_last_page)
         self.btn_last.grid(row=0, column=9, sticky=EW)
 
+        self.btn_load = Button(frm_top, text="Link", command=self.show_preview_window)
+        self.btn_load.grid(row=0, column=10, sticky=EW)
+
         self.frm_main = ScrollFrame(root)
         self.image_buttons = self.fill_panel(self.frm_main.view_port)
 
@@ -271,6 +274,13 @@ class MainWindow:
             return
 
         self.show_page_more_like_in_thread(model, None, True)
+
+    def show_preview_window(self):
+        model = self.sv_model.get().strip()
+        if len(model) == 0:
+            return
+        
+        self.load_main_image_in_thread(model, None)
 
     def show_page_more_like_in_thread(self, model, location, remember):
         global root
