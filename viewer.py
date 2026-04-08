@@ -76,8 +76,8 @@ STREAM_HEADERS = {
 
 CHATUBAT_NET_RU_HEADERS = {
     'User-Agent': USER_AGENT,
-    'Referer': 'https://chaturbat.net.ru',
-    'Host': 'chaturbat.net.ru',
+    'Referer': 'https://chaturbates.net.ru',
+    'Host': 'chaturbates.net.ru',
     'Accept': 'application/json, text/javascript, */*; q=0.01',
     'Accept-Language': 'ru-RU,ru;q=0.8,en-US;q=0.5,en;q=0.3',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -544,7 +544,7 @@ class MainWindow:
 
 
 def get_all_online():
-    # driver.get(f'view-source:https://chaturbat.net.ru/get-models/all')
+    # driver.get(f'view-source:https://chaturbates.net.ru/get-models/all')
 
     # content = driver.find_element(By.TAG_NAME, 'pre').text
     # result = json.loads(content)
@@ -564,8 +564,8 @@ def get_all_online():
             scraper = cloudscraper.create_scraper(http_session)
             online_models = {}
             for page in range(1, 100):
-                r = scraper.get(f"https://chaturbat.net.ru/more-models?page={page}", timeout=TIMEOUT)
-                # r = http_session.get("https://chaturbat.net.ru/get-models/all", timeout=TIMEOUT)
+                r = scraper.get(f"https://chaturbates.net.ru/more-models?page={page}", timeout=TIMEOUT)
+                # r = http_session.get("https://chaturbates.net.ru/get-models/all", timeout=TIMEOUT)
                 if r.status_code != 200:
                     return None
             

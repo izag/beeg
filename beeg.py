@@ -41,8 +41,8 @@ HEADERS = {
 
 CHATUBAT_NET_RU_HEADERS = {
     'User-Agent': USER_AGENT,
-    'Referer': 'https://chaturbat.net.ru',
-    'Host': 'chaturbat.net.ru',
+    'Referer': 'https://chaturbates.net.ru',
+    'Host': 'chaturbates.net.ru',
     'Accept': '*/*',
     'Accept-Language': 'en-US,en;q=0.5',
     'Accept-Encoding': 'gzip, deflate, br, zstd',
@@ -64,7 +64,7 @@ LONG_IMG_DELAY = 30000
 SHORT_REC_DURATION = 120
 PAD = 5
 N_REPEAT = 3
-OUTPUT = os.path.join(os.path.expanduser("~"), "tmp3")
+OUTPUT = os.path.join(os.path.expanduser("~"), "tmp2")
 # OUTPUT = os.path.join("/mnt/localdrive/tmp", "tmp1")
 LOGS = "./logs/"
 
@@ -537,7 +537,7 @@ class MainWindow:
             self.http_session.headers.update(CHATUBAT_NET_RU_HEADERS)
             self.http_session.adapters['https://'].max_retries = Retry.DEFAULT
             scraper = cloudscraper.create_scraper(self.http_session)
-            r = scraper.get(f"https://chaturbat.net.ru/chat-model/{self.room.model_name}/none.json", timeout=TIMEOUT)
+            r = scraper.get(f"https://chaturbates.net.ru/chat-model/{self.room.model_name}/none.json", timeout=TIMEOUT)
             if r.status_code != 200:
                 root.after_idle(self.sv_stats.set, f"Get HLS source: status code {r.status_code}")
                 return None
@@ -1204,7 +1204,7 @@ class HistoryWindow:
             scraper = cloudscraper.create_scraper(self.parent_window.http_session)
             online_models = set()
             for page in range(1, 100):
-                r = scraper.get(f"https://chaturbat.net.ru/more-models?page={page}", timeout=TIMEOUT)
+                r = scraper.get(f"https://chaturbates.net.ru/more-models?page={page}", timeout=TIMEOUT)
                 if r.status_code != 200:
                     return None
                 
